@@ -1,7 +1,7 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
 **Status:** Active working plan  
-**Version:** 0.1  
+**Version:** 0.2  
 **Date:** 27 August 2026  
 **Owner:** Mac Workplace  
 **Target:** Production service on one managed Linux container host
@@ -33,6 +33,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Publication | Download into hidden same-filesystem temporary storage; validate; atomically rename |
 | Concurrency | One upstream transfer per canonical package while concurrent callers wait or share the coordinated result |
 | Cache model | Do not use NGINX's opaque hashed `proxy_cache` as the authoritative store |
+| Repository | Public GitHub repository [`fabianhartmann2/JCDS-ContentCache`](https://github.com/fabianhartmann2/JCDS-ContentCache) |
 
 ## 3. Implementation principles
 
@@ -75,9 +76,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 **Goal:** Demonstrate the complete miss-to-local-hit lifecycle locally.
 
-- [ ] Initialize the Go module and service entry point.
-- [ ] Add strict configuration parsing and startup validation.
-- [ ] Implement canonical package-name validation.
+- [x] Initialize the Go module and service entry point.
+- [x] Add strict configuration parsing and startup validation.
+- [x] Implement canonical package-name validation.
 - [ ] Implement an in-memory OAuth token provider with an expiry safety margin.
 - [ ] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
 - [ ] Define a replaceable Jamf file-resolver interface.
@@ -86,11 +87,11 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Implement same-filesystem temporary files and atomic publication.
 - [ ] Implement per-package single-flight coordination.
 - [ ] Decide and test whether an upstream fill continues after the initiating client disconnects.
-- [ ] Configure NGINX `try_files` for local hits and an internal helper route for misses.
-- [ ] Add Dockerfiles and a local Docker Compose stack.
+- [x] Configure NGINX `try_files` for local hits and an internal helper route for misses.
+- [x] Add Dockerfiles and a local Docker Compose stack.
 - [ ] Add mock OAuth, Jamf resolver and object-download services for integration tests.
 - [ ] Add structured logs with automatic sensitive-field exclusion.
-- [ ] Add basic liveness and readiness endpoints.
+- [x] Add basic liveness and readiness endpoints.
 
 **Milestone M1 acceptance evidence**
 
@@ -197,8 +198,8 @@ Repository scaffolding and mock-driven implementation can begin immediately. Rea
 - [ ] OQ-05 has enough evidence to select the miss/range policy.
 - [ ] OQ-06 has an enforceable destination and redirect allowlist.
 - [ ] OQ-11 fixes the canonical path model.
-- [ ] The repository owner, name and visibility are confirmed.
-- [ ] A GitHub connection with permission to create or write the repository is available.
+- [x] The repository owner, name and public visibility are confirmed.
+- [x] A GitHub connection with permission to create or write the repository is available.
 
 OQ-12 may initially use the recommended starting position if upstream checksum metadata is not available. Capacity, availability, TLS, secrets and monitoring questions must be resolved before Phase 3.
 
@@ -254,12 +255,13 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Storage | Selected a filename-preserving filesystem store with hidden temporary files and atomic publication | Resolved |
 | 2026-08-27 | Package identity | Confirmed immutable filenames | Resolved |
 | 2026-08-27 | Execution | Established contract validation, vertical slice, hardening, production integration and rollout phases | Active |
+| 2026-08-27 | Repository | Confirmed public repository `fabianhartmann2/JCDS-ContentCache` and write access | Resolved |
+| 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
 
 ## 10. Immediate next actions
 
-1. Create the private GitHub repository, recommended name `jamf-jcds-package-cache`.
-2. Add the initial repository structure, requirements document and this execution plan.
-3. Protect the default branch and require CI checks once the first workflow exists.
-4. Begin the mock-driven Phase 1 vertical slice in parallel with Phase 0 evidence collection.
+1. Implement and test the in-memory OAuth client-credentials token provider against a local mock endpoint.
+2. Define the replaceable Jamf file-resolver interface and sanitized response fixtures.
+3. Add mock resolver and object-download services for the first integration test.
+4. Enable default-branch protection and require the passing CI workflow when repository settings permit.
 5. Obtain a redacted successful Jamf file-resolution JSON response as the first external-contract artifact.
-
