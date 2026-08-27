@@ -1,0 +1,68 @@
+user nginx;
+worker_processes auto;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 4096;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    server_tokens off;
+
+    upstream cache_helper {
+        server cache-helper:8080;
+        keepalive 32;
+    }
+
+    server {
+        listen 8443 ssl;
+        server_name packages.example.ch;
+
+        ssl_certificate /etc/nginx/tls/tls.crt;
+        ssl_certificate_key /etc/nginx/tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        # Replace these example ranges with the approved managed-client networks.
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        deny all;
+
+        location = /health/live {
+            proxy_pass http://cache_helper;
+        }
+
+        location = /health/ready {
+            proxy_pass http://cache_helper;
+        }
+
+        location /packages/ {
+            limit_except GET HEAD {
+                deny all;
+            }
+
+            root /srv/jamf-store;
+            disable_symlinks on from=/srv/jamf-store;
+            try_files $uri @fetch_from_jamf;
+            add_header X-Package-Source LOCAL always;
+        }
+
+        location @fetch_from_jamf {
+            proxy_pass http://cache_helper;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header Range "";
+            proxy_set_header If-Range "";
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_ignore_client_abort on;
+            proxy_connect_timeout 15s;
+            proxy_read_timeout 2h;
+            proxy_send_timeout 2h;
+        }
+    }
+}
+

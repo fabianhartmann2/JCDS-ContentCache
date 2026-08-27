@@ -1,38 +1,52 @@
 package config
 
 import (
-	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
-func TestLoadDefaults(t *testing.T) {
-	t.Setenv("CACHE_HELPER_LISTEN_ADDRESS", "")
-	t.Setenv("CACHE_STORE_ROOT", "")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if cfg.ListenAddress != defaultListenAddress {
-		t.Fatalf("ListenAddress = %q, want %q", cfg.ListenAddress, defaultListenAddress)
-	}
-	if cfg.StoreRoot != defaultStoreRoot {
-		t.Fatalf("StoreRoot = %q, want %q", cfg.StoreRoot, defaultStoreRoot)
-	}
-}
-
-func TestLoadRejectsRelativeStoreRoot(t *testing.T) {
-	t.Setenv("CACHE_STORE_ROOT", filepath.Join("var", "cache"))
-
-	if _, err := Load(); err == nil {
-		t.Fatal("Load() error = nil, want relative-path validation error")
+func validConfig() Config {
+	return Config{
+		ListenAddress:         ":8080",
+		StoreRoot:             "/srv/jamf-store/packages",
+		TempRoot:              "/srv/jamf-store/.temporary",
+		TokenURL:              "https://tenant.example/api/oauth/token",
+		ClientID:              "client-id",
+		ClientSecret:          "client-secret",
+		ResolverURLTemplate:   "https://tenant.example/api/files/{filename}",
+		DownloadURLField:      "url",
+		AllowedDownloadHosts: []string{"download.example"},
+		TokenExpirySkew:       time.Minute,
+		FillTimeout:           time.Hour,
+		ShutdownTimeout:       time.Minute,
+		MaxPackageBytes:       1024,
 	}
 }
 
-func TestLoadRejectsInvalidListenAddress(t *testing.T) {
-	t.Setenv("CACHE_HELPER_LISTEN_ADDRESS", "8080")
-
-	if _, err := Load(); err == nil {
-		t.Fatal("Load() error = nil, want listen-address validation error")
+func TestValidateAcceptsCompleteConfig(t *testing.T) {
+	if err := validConfig().Validate(); err != nil {
+		t.Fatalf("Validate() returned an unexpected error: %v", err)
 	}
 }
+
+func TestValidateRejectsHTTPByDefault(t *testing.T) {
+	cfg := validConfig()
+	cfg.TokenURL = "http://tenant.example/api/oauth/token"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "must use HTTPS") {
+		t.Fatalf("Validate() error = %v, want HTTPS error", err)
+	}
+}
+
+func TestValidateRequiresOneResolverPlaceholder(t *testing.T) {
+	cfg := validConfig()
+	cfg.ResolverURLTemplate = "https://tenant.example/api/files/static.pkg"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "exactly once") {
+		t.Fatalf("Validate() error = %v, want placeholder error", err)
+	}
+}
+

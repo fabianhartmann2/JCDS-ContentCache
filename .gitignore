@@ -1,21 +1,8 @@
-# Build output
-/bin/
-/dist/
-coverage.out
-
-# Local configuration and secrets
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-secrets/
-
-# Editors and operating systems
 .DS_Store
-.idea/
-.vscode/
-*.swp
+.env
+/bin/
+/coverage.out
+/dist/
+/tmp/
+*.part
 
-# Local package-store data
-/data/

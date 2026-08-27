@@ -1,77 +1,100 @@
 # JCDS Content Cache
 
-Filesystem-backed pull-through package delivery for Jamf Cloud Distribution Service (JCDS).
-
-> **Status:** Early implementation. The current helper validates configuration, exposes health endpoints and rejects unsafe package paths. OAuth, Jamf resolution, streaming download and atomic publication are the next vertical-slice work.
-
-## Intended behavior
-
-Clients request a stable internal URL such as:
+`JCDS-ContentCache` is a filesystem-backed pull-through package store for Jamf Cloud Distribution Service (JCDS). Managed clients use a stable internal URL such as:
 
 ```text
-GET https://packages.example.invalid:8443/packages/ExampleFile.pkg
+https://packages.example.ch:8443/packages/ExampleFile.pkg
 ```
 
-NGINX serves a completed package directly from:
+NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name.
+
+> [!IMPORTANT]
+> This repository is an early mock-driven implementation. It must not be connected to production Jamf credentials until the external API contract, destination allowlist, client range behavior, and security controls in the execution plan are validated.
+
+## Current milestone
+
+Milestone M1 demonstrates the complete local lifecycle without credentials:
+
+1. First `GET` is routed through the helper.
+2. Mock OAuth and resolver endpoints return a temporary object URL.
+3. The helper begins streaming while it writes a hidden `.part` file.
+4. A complete object is atomically published under its canonical filename.
+5. The next request is served directly by NGINX.
+6. Concurrent misses for the same filename share one upstream fill.
+
+The v1 prototype accepts one filename segment ending in `.pkg`. This is a provisional implementation of open question OQ-11, not yet a final production decision.
+
+## Local demonstration
+
+Requirements: Docker Engine with the Compose plugin and `curl`.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up --build -d
+curl --fail --show-error --dump-header - \
+  http://localhost:8443/packages/ExampleFile.pkg \
+  --output /tmp/ExampleFile.pkg
+curl --fail --show-error --dump-header - \
+  http://localhost:8443/packages/ExampleFile.pkg \
+  --output /tmp/ExampleFile-second.pkg
+cmp /tmp/ExampleFile.pkg /tmp/ExampleFile-second.pkg
+```
+
+Expected response headers:
+
+- First request: `X-Package-Source: JCDS`
+- Subsequent request: `X-Package-Source: LOCAL`
+
+The local stack intentionally uses plain HTTP on host port `8443`. Production deployment must use the TLS template and enterprise-managed certificates.
+
+Stop and remove the development stack:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml down
+```
+
+Add `-v` only when you intentionally want to delete the local package-store volume.
+
+## Test and build
+
+```bash
+go test -race ./...
+go vet ./...
+go build ./cmd/cache-helper ./cmd/mock-upstream
+```
+
+CI also builds the container image. No test fixture contains a real token, secret, signed URL, or package.
+
+## Repository map
 
 ```text
-/srv/jamf-store/packages/ExampleFile.pkg
+cmd/cache-helper/       Go service entry point
+cmd/mock-upstream/      Credential-free development upstream
+internal/auth/          OAuth token reuse and refresh
+internal/config/        Environment parsing and validation
+internal/download/      Download URL and redirect policy
+internal/httpapi/       Health and package request handlers
+internal/jamf/          Replaceable Jamf resolver adapter
+internal/store/         Temporary files, publication and single-flight locks
+deploy/compose/         Local development stack
+deploy/nginx/           Development and production NGINX templates
+docs/                   Requirements, execution plan and contract evidence
 ```
-
-On a miss, NGINX calls the internal Go helper. The helper will obtain a short-lived OAuth token, resolve a temporary JCDS URL, validate its destination, stream the object to the first client, and atomically publish the completed file for later local delivery.
-
-## Current repository contents
-
-- `cmd/cache-helper`: service entry point and graceful shutdown
-- `internal/config`: strict non-secret configuration
-- `internal/pathpolicy`: v1 package filename validation
-- `internal/httpapi`: health endpoints and safe miss-request validation
-- `deploy/nginx`: local-hit and helper-miss routing
-- `deploy/compose`: local two-container development stack
-- `docs`: requirements and phased execution plan
-
-## Local development
-
-Requirements:
-
-- Go version declared in `go.mod`
-- Docker with Compose for the two-container stack
-
-Run unit tests:
-
-```console
-go test ./...
-```
-
-Start the development stack:
-
-```console
-docker compose -f deploy/compose/compose.yaml up --build
-```
-
-Check the helper through NGINX:
-
-```console
-curl --fail http://localhost:8081/livez
-curl --fail http://localhost:8081/readyz
-```
-
-The development listener is intentionally plain HTTP on port 8081. Production TLS, enterprise access controls and credentials will be added only after the relevant open questions are resolved.
-
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CACHE_HELPER_LISTEN_ADDRESS` | `:8080` | Internal helper listener |
-| `CACHE_STORE_ROOT` | `/srv/jamf-store` | Absolute root of the filename-preserving package store |
-
-No credentials belong in this repository. Future Jamf client secrets must be supplied by the selected runtime secret mechanism.
 
 ## Documentation
 
-- `docs/requirements.md` — normative product and technical requirements
-- `docs/execution-plan.md` — active phase plan, gates and open-question register
+- [Technical requirements](docs/requirements.md)
+- [Project execution plan](docs/execution-plan.md)
+- [External-contract evidence template](docs/external-contracts.md)
+
+## Security notes
+
+- Never commit Jamf client credentials, OAuth tokens, temporary signed URLs, or unsanitized API responses.
+- The helper accepts only a validated package filename and never accepts a client-supplied upstream URL.
+- Every resolved URL and redirect is checked against the configured hostname allowlist.
+- NGINX receives read-only access to completed package storage; the helper owns publication.
+- Hidden temporary storage is outside the namespace served by NGINX.
 
 ## License
 
-No license has been selected yet. Until one is added, normal copyright rules apply.
+No open-source license has been selected yet. Until the repository owner adds one, normal copyright restrictions apply.
+
