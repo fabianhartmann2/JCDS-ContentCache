@@ -79,7 +79,7 @@ The resolver response contains only the signed URL. Object integrity metadata is
 
 - Observed destination class: An HTTPS AWS CloudFront distribution. The exact tenant-specific hostname is intentionally omitted from this public repository and must be supplied through deployment configuration.
 - Approved hostname(s): The observed resolver responses use one stable destination hostname, but the production inventory is not yet finalized. Configure exact hostnames; do not use a broad wildcard allowlist.
-- Approved redirects: Not yet observed or tested. Every redirect must be revalidated against the same exact-host policy.
+- Approved redirects: No tenant redirect has yet been observed. Automated tests prove that every redirect is revalidated against the same exact-host policy, that an allowed redirect is followed, and that an unlisted redirect target is rejected before any request reaches it.
 - URL lifetime: Encoded in the signed URL's `Expires` query parameter. More samples are required to establish the normal validity duration.
 - Signed-query values must never be logged or committed.
 - Successful status:

@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha3"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -233,5 +235,217 @@ func TestChecksumMismatchIsNotPublished(t *testing.T) {
 
 	if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
 		t.Fatalf("checksum-mismatched package was published, stat error = %v", err)
+	}
+}
+
+func TestClientDisconnectDoesNotCancelFill(t *testing.T) {
+	firstChunk := []byte("first streamed chunk\n")
+	secondChunk := []byte("remaining package bytes\n")
+	expectedContent := append(append([]byte{}, firstChunk...), secondChunk...)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	var objectCalls atomic.Int64
+
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		objectCalls.Add(1)
+		w.Header().Set("Content-Length", strconv.Itoa(len(expectedContent)))
+		_, _ = w.Write(firstChunk)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-release
+		_, _ = w.Write(secondChunk)
+	}))
+	defer objectServer.Close()
+
+	api, finalPath, resolver, metadata := newTestServer(t, objectServer.URL, expectedContent)
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+	defer unblock()
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, server.URL+"/packages/ExampleFile.pkg", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext() error = %v", err)
+	}
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatalf("GET miss error = %v", err)
+	}
+	firstResponseChunk := make([]byte, len(firstChunk))
+	if _, err := io.ReadFull(response.Body, firstResponseChunk); err != nil {
+		t.Fatalf("read first streamed chunk: %v", err)
+	}
+	if string(firstResponseChunk) != string(firstChunk) {
+		t.Fatalf("first streamed chunk = %q, want %q", firstResponseChunk, firstChunk)
+	}
+
+	cancel()
+	response.Body.Close()
+	unblock()
+	waitForFile(t, finalPath)
+
+	localResponse, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
+	if err != nil {
+		t.Fatalf("GET completed package error = %v", err)
+	}
+	localBody, err := io.ReadAll(localResponse.Body)
+	localResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read completed package: %v", err)
+	}
+	if string(localBody) != string(expectedContent) {
+		t.Fatalf("completed package = %q, want %q", localBody, expectedContent)
+	}
+	if got := localResponse.Header.Get("X-Package-Source"); got != "LOCAL" {
+		t.Fatalf("completed package source = %q, want LOCAL", got)
+	}
+	if got := objectCalls.Load(); got != 1 {
+		t.Fatalf("object calls = %d, want 1", got)
+	}
+	if got := resolver.calls.Load(); got != 1 {
+		t.Fatalf("resolver calls = %d, want 1", got)
+	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
+}
+
+func TestTruncatedUpstreamObjectIsNotPublished(t *testing.T) {
+	expectedContent := []byte("complete package content")
+	partialContent := expectedContent[:8]
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(expectedContent)))
+		_, _ = w.Write(partialContent)
+	}))
+	defer objectServer.Close()
+
+	api, finalPath, resolver, metadata := newTestServer(t, objectServer.URL, expectedContent)
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
+	if err != nil {
+		t.Fatalf("GET miss error = %v", err)
+	}
+	_, readErr := io.ReadAll(response.Body)
+	response.Body.Close()
+	if !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		t.Fatalf("response read error = %v, want unexpected EOF", readErr)
+	}
+	if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
+		t.Fatalf("truncated package was published, stat error = %v", err)
+	}
+	temporaryRoot := filepath.Join(filepath.Dir(filepath.Dir(finalPath)), ".temporary")
+	temporaryEntries, err := os.ReadDir(temporaryRoot)
+	if err != nil {
+		t.Fatalf("read temporary directory: %v", err)
+	}
+	if len(temporaryEntries) != 0 {
+		t.Fatalf("temporary directory contains %d entries after truncated transfer", len(temporaryEntries))
+	}
+	if got := resolver.calls.Load(); got != 1 {
+		t.Fatalf("resolver calls = %d, want 1", got)
+	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
+}
+
+func TestRangeOnMissFetchesFullObjectAndLocalHitServesRange(t *testing.T) {
+	content := []byte("0123456789abcdefghijklmnopqrstuvwxyz")
+	receivedRange := make(chan string, 1)
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedRange <- r.Header.Get("Range")
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+		_, _ = w.Write(content)
+	}))
+	defer objectServer.Close()
+
+	api, finalPath, resolver, metadata := newTestServer(t, objectServer.URL, content)
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	missRequest, err := http.NewRequest(http.MethodGet, server.URL+"/packages/ExampleFile.pkg", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	missRequest.Header.Set("Range", "bytes=5-9")
+	missResponse, err := server.Client().Do(missRequest)
+	if err != nil {
+		t.Fatalf("range GET miss error = %v", err)
+	}
+	missBody, err := io.ReadAll(missResponse.Body)
+	missResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read range miss response: %v", err)
+	}
+	if missResponse.StatusCode != http.StatusOK {
+		t.Fatalf("range miss status = %d, want 200", missResponse.StatusCode)
+	}
+	if string(missBody) != string(content) {
+		t.Fatalf("range miss body = %q, want complete object", missBody)
+	}
+	if got := <-receivedRange; got != "" {
+		t.Fatalf("upstream Range header = %q, want empty", got)
+	}
+	waitForFile(t, finalPath)
+
+	localRequest, err := http.NewRequest(http.MethodGet, server.URL+"/packages/ExampleFile.pkg", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	localRequest.Header.Set("Range", "bytes=5-9")
+	localResponse, err := server.Client().Do(localRequest)
+	if err != nil {
+		t.Fatalf("range GET local error = %v", err)
+	}
+	localBody, err := io.ReadAll(localResponse.Body)
+	localResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read local range response: %v", err)
+	}
+	if localResponse.StatusCode != http.StatusPartialContent {
+		t.Fatalf("local range status = %d, want 206", localResponse.StatusCode)
+	}
+	if string(localBody) != string(content[5:10]) {
+		t.Fatalf("local range body = %q, want %q", localBody, content[5:10])
+	}
+	wantContentRange := "bytes 5-9/" + strconv.Itoa(len(content))
+	if got := localResponse.Header.Get("Content-Range"); got != wantContentRange {
+		t.Fatalf("Content-Range = %q, want %q", got, wantContentRange)
+	}
+	if got := localResponse.Header.Get("X-Package-Source"); got != "LOCAL" {
+		t.Fatalf("local range source = %q, want LOCAL", got)
+	}
+	if got := resolver.calls.Load(); got != 1 {
+		t.Fatalf("resolver calls = %d, want 1", got)
+	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
+}
+
+func TestHeadMissDoesNotStartUpstreamFill(t *testing.T) {
+	api, _, resolver, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
+	request := httptest.NewRequest(http.MethodHead, "/packages/ExampleFile.pkg", nil)
+	response := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HEAD miss status = %d, want 503", response.Code)
+	}
+	if got := response.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q, want 1", got)
+	}
+	if got := resolver.calls.Load(); got != 0 {
+		t.Fatalf("resolver calls = %d, want 0", got)
+	}
+	if got := metadata.calls.Load(); got != 0 {
+		t.Fatalf("metadata calls = %d, want 0", got)
 	}
 }

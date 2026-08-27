@@ -1,7 +1,7 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
 **Status:** Active working plan  
-**Version:** 0.2  
+**Version:** 0.3  
 **Date:** 27 August 2026  
 **Owner:** Mac Workplace  
 **Target:** Production service on one managed Linux container host
@@ -65,7 +65,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Establish JCDS catalog `length` and SHA3-512 as the publication-integrity source of truth.
 - [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, and range support.
 - [ ] Capture representative Mac client requests for `GET`, `HEAD`, single-range resume and any multi-range behavior.
-- [ ] Confirm whether the first store-miss request will always fetch a complete object even when the client requests a range.
+- [x] Implement and test the provisional rule that a store miss always fetches a complete object even when the client requests a range.
 - [ ] Confirm the v1 path model: one filename segment ending in `.pkg`, or nested subdirectories.
 - [ ] Record findings in `docs/external-contracts.md`; include only sanitized examples.
 
@@ -91,7 +91,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement streaming object download without whole-file memory buffering.
 - [x] Implement same-filesystem temporary files and atomic publication.
 - [x] Implement per-package single-flight coordination.
-- [ ] Decide and test whether an upstream fill continues after the initiating client disconnects.
+- [x] Continue a bounded upstream fill after the initiating client disconnects, and test successful subsequent local delivery.
 - [x] Configure NGINX `try_files` for local hits and an internal helper route for misses.
 - [x] Add Dockerfiles and a local Docker Compose stack.
 - [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
@@ -103,11 +103,11 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 - [x] The first request starts receiving bytes before the complete object reaches the cache host.
 - [x] A completed download appears at the deterministic final path and matches the source bytes.
-- [ ] The second request is served locally without OAuth, Jamf API or object-download calls.
+- [x] The second request is served locally without OAuth, Jamf API or object-download calls.
 - [x] Concurrent misses for one package cause one upstream object transfer.
-- [ ] An interrupted or corrupt transfer never appears at the final public path.
-- [ ] A client abort behaves according to the recorded policy.
-- [ ] Restarting the containers preserves and serves completed packages.
+- [x] An interrupted or corrupt transfer never appears at the final public path.
+- [x] A client abort behaves according to the recorded policy.
+- [x] Restarting the containers preserves and serves completed packages.
 
 ### Phase 2 — Security and failure handling
 
@@ -265,12 +265,12 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Execution | Established contract validation, vertical slice, hardening, production integration and rollout phases | Active |
 | 2026-08-27 | Repository | Confirmed public repository `fabianhartmann2/JCDS-ContentCache` and write access | Resolved |
 | 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
-| 2026-08-27 | Milestone M1 | Implemented the mock-driven streaming helper on `codex/m1-streaming-cache`; formatting, race tests, vet, builds and container build pass in CI | In review |
+| 2026-08-27 | Milestone M1 | Added automated deployed-path evidence for MISS-to-LOCAL delivery, local ranges, client-abort continuation, truncated-transfer cleanup and persistence across serving-container restarts | In review |
 
 ## 10. Immediate next actions
 
-1. Add an end-to-end Docker Compose smoke test proving the NGINX MISS-to-LOCAL transition.
-2. Test interrupted transfers and client aborts; confirm that no partial package is published.
-3. Test persistence and local delivery across container restarts.
-4. Enable default-branch protection and require the passing CI workflow when repository settings permit.
-5. Obtain a redacted successful Jamf file-resolution JSON response as the first external-contract artifact.
+1. Capture sanitized unauthorized, throttled and server-error Jamf response shapes and add adapter/error-mapping tests.
+2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range traffic to resolve OQ-05.
+3. Confirm the production JCDS hostname inventory and whether real resolver URLs redirect, then resolve OQ-06.
+4. Decide whether v1 permanently uses one flat `.pkg` filename segment, resolving OQ-11.
+5. Enable default-branch protection and require the passing CI workflow when repository settings permit.

@@ -29,3 +29,5 @@ jobs:
         run: go build ./cmd/cache-helper ./cmd/mock-upstream
       - name: Build container image
         run: docker build --tag jcds-content-cache:ci .
+      - name: Docker Compose smoke test
+        run: tests/integration/compose_smoke.sh

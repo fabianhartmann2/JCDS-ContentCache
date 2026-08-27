@@ -22,6 +22,10 @@ Milestone M1 demonstrates the complete local lifecycle without credentials:
 5. A length- and SHA3-validated object is atomically published under its canonical filename.
 6. The next request is served directly by NGINX.
 7. Concurrent misses for the same filename share one upstream fill.
+8. Client disconnects do not cancel an active, bounded cache fill.
+9. Truncated or digest-mismatched transfers are discarded rather than published.
+10. Completed packages survive helper and NGINX container restarts.
+11. A range request on a miss retrieves the complete object; local hits support normal `206 Partial Content` delivery.
 
 The v1 prototype accepts one filename segment ending in `.pkg`. This is a provisional implementation of open question OQ-11, not yet a final production decision.
 
@@ -64,6 +68,14 @@ go build ./cmd/cache-helper ./cmd/mock-upstream
 ```
 
 CI also builds the container image. No test fixture contains a real token, secret, signed URL, or package.
+
+Run the deployed-path smoke test separately with Docker:
+
+```bash
+tests/integration/compose_smoke.sh
+```
+
+It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms the completed package is still served locally.
 
 ## Repository map
 

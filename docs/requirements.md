@@ -643,6 +643,12 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 - Client compatibility is demonstrated on a representative managed Mac and installation workflow.
 
+### 14.2 Current M1 automated evidence
+
+The mock-driven milestone currently provides automated evidence for AT-01 through AT-05, the unsafe-redirect portion of AT-10, the truncation/length/digest portion of AT-11, the provisional miss/local-range portion of AT-12, and serving-container persistence from AT-14. The Docker Compose smoke test covers the deployed NGINX/helper path and verifies that upstream request counters remain unchanged for a repeated local hit, a local range request and a request after serving-container restart.
+
+This evidence does not close the production gates. Actual managed-Mac traffic is still required for AT-12, actual JCDS destination and redirect observations are required for AT-10, and host reboot plus in-progress restart cases remain for AT-14.
+
 - Rollback, secret rotation, certificate renewal and package-store-loss recovery are exercised.
 
 ## 15. Risks and mitigations
