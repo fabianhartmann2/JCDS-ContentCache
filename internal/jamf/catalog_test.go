@@ -89,7 +89,7 @@ func TestCatalogRejectsIncompletePaginatedEnvelope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"totalCount": 2,
-			"results": []FileMetadata{{FileName: "ExampleFile.pkg", Length: 42, SHA3: testSHA3}},
+			"results":    []FileMetadata{{FileName: "ExampleFile.pkg", Length: 42, SHA3: testSHA3}},
 		})
 	}))
 	defer server.Close()
