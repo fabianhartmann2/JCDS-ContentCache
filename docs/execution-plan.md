@@ -79,26 +79,26 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Initialize the Go module and service entry point.
 - [x] Add strict configuration parsing and startup validation.
 - [x] Implement canonical package-name validation.
-- [ ] Implement an in-memory OAuth token provider with an expiry safety margin.
-- [ ] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
-- [ ] Define a replaceable Jamf file-resolver interface.
-- [ ] Validate resolved URLs against HTTPS, hostname and redirect policy.
-- [ ] Implement streaming object download without whole-file memory buffering.
-- [ ] Implement same-filesystem temporary files and atomic publication.
-- [ ] Implement per-package single-flight coordination.
+- [x] Implement an in-memory OAuth token provider with an expiry safety margin.
+- [x] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
+- [x] Define a replaceable Jamf file-resolver interface.
+- [x] Validate resolved URLs against HTTPS, hostname and redirect policy.
+- [x] Implement streaming object download without whole-file memory buffering.
+- [x] Implement same-filesystem temporary files and atomic publication.
+- [x] Implement per-package single-flight coordination.
 - [ ] Decide and test whether an upstream fill continues after the initiating client disconnects.
 - [x] Configure NGINX `try_files` for local hits and an internal helper route for misses.
 - [x] Add Dockerfiles and a local Docker Compose stack.
-- [ ] Add mock OAuth, Jamf resolver and object-download services for integration tests.
-- [ ] Add structured logs with automatic sensitive-field exclusion.
+- [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
+- [x] Add structured logs with automatic sensitive-field exclusion.
 - [x] Add basic liveness and readiness endpoints.
 
 **Milestone M1 acceptance evidence**
 
-- [ ] The first request starts receiving bytes before the complete object reaches the cache host.
-- [ ] A completed download appears at the deterministic final path and matches the source bytes.
+- [x] The first request starts receiving bytes before the complete object reaches the cache host.
+- [x] A completed download appears at the deterministic final path and matches the source bytes.
 - [ ] The second request is served locally without OAuth, Jamf API or object-download calls.
-- [ ] Concurrent misses for one package cause one upstream object transfer.
+- [x] Concurrent misses for one package cause one upstream object transfer.
 - [ ] An interrupted or corrupt transfer never appears at the final public path.
 - [ ] A client abort behaves according to the recorded policy.
 - [ ] Restarting the containers preserves and serves completed packages.
@@ -257,11 +257,12 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Execution | Established contract validation, vertical slice, hardening, production integration and rollout phases | Active |
 | 2026-08-27 | Repository | Confirmed public repository `fabianhartmann2/JCDS-ContentCache` and write access | Resolved |
 | 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
+| 2026-08-27 | Milestone M1 | Implemented the mock-driven streaming helper on `codex/m1-streaming-cache`; formatting, race tests, vet, builds and container build pass in CI | In review |
 
 ## 10. Immediate next actions
 
-1. Implement and test the in-memory OAuth client-credentials token provider against a local mock endpoint.
-2. Define the replaceable Jamf file-resolver interface and sanitized response fixtures.
-3. Add mock resolver and object-download services for the first integration test.
+1. Add an end-to-end Docker Compose smoke test proving the NGINX MISS-to-LOCAL transition.
+2. Test interrupted transfers and client aborts; confirm that no partial package is published.
+3. Test persistence and local delivery across container restarts.
 4. Enable default-branch protection and require the passing CI workflow when repository settings permit.
 5. Obtain a redacted successful Jamf file-resolution JSON response as the first external-contract artifact.
