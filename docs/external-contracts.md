@@ -5,7 +5,7 @@
 
 Do not add credentials, access tokens, cookies, signed query parameters, tenant-sensitive package names, package digests, or internal hostnames to this file.
 
-The supported live-evidence workflow is `scripts/capture-live-contracts.sh`. It runs the capture command in an ephemeral, unprivileged Docker container and emits no raw tenant, credential, package-name, digest, object-path, header-value or signed-query values. Its report may be used to fill the remaining fields below after review.
+The supported live-evidence workflow is `scripts/capture-live-contracts.sh`. It runs the capture command in an ephemeral, unprivileged Docker container and emits no raw tenant, credential, package-name, digest, object-path, header-value or signed-query values. TLS-inspecting networks may mount a user-supplied PEM CA bundle read-only for the one-shot run; that bundle is not copied into the image or report. Its report may be used to fill the remaining fields below after review.
 
 ## Jamf OAuth contract
 

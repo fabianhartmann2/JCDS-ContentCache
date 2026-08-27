@@ -8,9 +8,11 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/contract-capture ./cmd/contract-capture
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates \
-    && addgroup -g 65532 -S capture \
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN addgroup -g 65532 -S capture \
     && adduser -u 65532 -S -D -H -G capture capture
 COPY --from=build /out/contract-capture /usr/local/bin/contract-capture
+COPY deploy/contract-capture/entrypoint.sh /usr/local/bin/contract-capture-entrypoint
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/contract-capture"]
+ENTRYPOINT ["/usr/local/bin/contract-capture-entrypoint"]
+CMD ["/usr/local/bin/contract-capture"]

@@ -71,7 +71,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement and test the provisional rule that a store miss always fetches a complete object even when the client requests a range.
 - [x] Confirm the v1 path model as one filename segment ending in lowercase `.pkg`, without nested subdirectories or additional file types.
 - [x] Record current findings in `docs/external-contracts.md`; include only sanitized examples.
-- [x] Add a Dockerized contract-capture workflow that emits only schema types, expiry seconds, aggregate package sizing, metadata-presence checks, digest lengths, hostname fingerprints, redirect counts, and safe HEAD/range capability observations.
+- [x] Add a Dockerized contract-capture workflow that emits only schema types, expiry seconds, aggregate package sizing, metadata-presence checks, digest lengths, hostname fingerprints, redirect counts, and safe HEAD/range capability observations; support a read-only, user-supplied PEM CA bundle for TLS-inspecting networks.
 
 **Exit criteria**
 

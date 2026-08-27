@@ -61,11 +61,35 @@ prompt_value() {
   export "${variable_name}=${current_value}"
 }
 
+prompt_optional_ca_file() {
+  local current_value="${CAPTURE_CA_CERT_FILE:-}"
+
+  if [[ -z "${current_value}" && -t 0 ]]; then
+    read -r -p "Enterprise root/intermediate CA bundle in PEM format (optional; press Return to skip): " current_value
+  fi
+  if [[ -z "${current_value}" ]]; then
+    return
+  fi
+  if [[ ! -f "${current_value}" || ! -r "${current_value}" ]]; then
+    echo "CAPTURE_CA_CERT_FILE must be a readable regular file." >&2
+    exit 1
+  fi
+  if ! grep --quiet -- "-----BEGIN CERTIFICATE-----" "${current_value}"; then
+    echo "CAPTURE_CA_CERT_FILE must contain PEM certificates." >&2
+    exit 1
+  fi
+
+  local ca_directory
+  ca_directory="$(cd "$(dirname "${current_value}")" && pwd -P)"
+  export CAPTURE_CA_CERT_FILE="${ca_directory}/$(basename "${current_value}")"
+}
+
 require_docker
 prompt_value JAMF_BASE_URL "Jamf Pro base URL (https://tenant.example)"
 prompt_value JAMF_CLIENT_ID "Read-only Jamf API client ID"
 prompt_value JAMF_CLIENT_SECRET "Read-only Jamf API client secret" true
 prompt_value CAPTURE_PACKAGE_NAME "Existing flat .pkg filename"
+prompt_optional_ca_file
 
 JAMF_BASE_URL="${JAMF_BASE_URL%/}"
 if [[ "${JAMF_BASE_URL}" != https://* ]]; then
@@ -80,7 +104,15 @@ echo "Building the credential-free capture image..." >&2
 compose build contract-capture >&2
 
 echo "Running sanitized catalog, resolver, HEAD, and one-byte range probes..." >&2
-compose run --rm --no-deps -T contract-capture >"${report_file}"
+run_options=(run --rm --no-deps -T)
+if [[ -n "${CAPTURE_CA_CERT_FILE:-}" ]]; then
+  run_options+=(
+    --env CAPTURE_CA_CERT_FILE=/run/secrets/enterprise-ca.pem
+    --volume "${CAPTURE_CA_CERT_FILE}:/run/secrets/enterprise-ca.pem:ro"
+  )
+fi
+run_options+=(contract-capture)
+compose "${run_options[@]}" >"${report_file}"
 
 for sensitive_value in "${JAMF_BASE_URL}" "${JAMF_CLIENT_ID}" "${JAMF_CLIENT_SECRET}" "${CAPTURE_PACKAGE_NAME}"; do
   if [[ ${#sensitive_value} -ge 4 ]] && grep --fixed-strings --quiet -- "${sensitive_value}" "${report_file}"; then

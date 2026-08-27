@@ -41,5 +41,14 @@ jobs:
           bash -n scripts/capture-live-contracts.sh
           docker compose --file deploy/contract-capture/compose.yaml config --quiet
           docker build --file deploy/contract-capture/Dockerfile --tag jcds-contract-capture:ci .
+          docker run --rm jcds-contract-capture:ci /bin/sh -c 'test -s /etc/ssl/certs/ca-certificates.crt'
+          capture_ca="$(mktemp)"
+          printf '%s\n' '-----BEGIN CERTIFICATE-----' 'synthetic-ca-marker' '-----END CERTIFICATE-----' >"${capture_ca}"
+          docker run --rm \
+            --env CAPTURE_CA_CERT_FILE=/run/secrets/enterprise-ca.pem \
+            --volume "${capture_ca}:/run/secrets/enterprise-ca.pem:ro" \
+            jcds-contract-capture:ci \
+            /bin/sh -c 'test "${SSL_CERT_FILE}" = /tmp/capture-ca-bundle.pem && grep --quiet synthetic-ca-marker "${SSL_CERT_FILE}"'
+          rm -f -- "${capture_ca}"
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

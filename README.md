@@ -87,7 +87,7 @@ After a dedicated read-only Jamf API client is available, run the Docker wrapper
 ./scripts/capture-live-contracts.sh > sanitized-contract-report.json
 ```
 
-The wrapper prompts for the Jamf base URL, read-only API client ID, hidden client secret, and one existing flat `.pkg` filename. It builds an unprivileged one-shot image, runs with a read-only root filesystem and all Linux capabilities dropped, removes the container afterward, and applies a final disclosure guard before printing the report. Values entered at the prompts are not placed in shell history or written to the report. Like any Docker environment value, they remain inspectable by a local Docker administrator while the short-lived container is running.
+The wrapper prompts for the Jamf base URL, read-only API client ID, hidden client secret, one existing flat `.pkg` filename, and an optional enterprise CA bundle. It builds an unprivileged one-shot image, runs with a read-only root filesystem and all Linux capabilities dropped, removes the container afterward, and applies a final disclosure guard before printing the report. Values entered at the prompts are not placed in shell history or written to the report. Like any Docker environment value, they remain inspectable by a local Docker administrator while the short-lived container is running.
 
 The live validation performs one OAuth request, one catalog request, one resolver request, one object `HEAD`, and one `GET` with `Range: bytes=0-0`. If the object endpoint ignores the range and returns `200`, the client closes the body immediately rather than intentionally downloading the complete package. The generated JSON contains only:
 
@@ -99,7 +99,9 @@ The live validation performs one OAuth request, one catalog request, one resolve
 
 It does not contain the access token, client secret, tenant hostname, selected package name, package digests, signed URL, object path, query values, ETag or Last-Modified value. The report filename pattern is ignored by Git, but the report should still be reviewed before it is shared.
 
-If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only.
+If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only. Networks that inspect TLS must also provide the inspecting enterprise root or intermediate certificates as a PEM file at the optional prompt, or export its path as `CAPTURE_CA_CERT_FILE`. The file is mounted read-only for the one-shot run, combined in memory-backed temporary storage with the public CA bundle, and is never copied into the image or report.
+
+The capture image performs no package-repository download during its final build stage. Its public CA bundle is copied from the pinned Go builder image, which avoids failures caused by TLS inspection of Alpine package repositories.
 
 Developers with Go 1.24 may run `go run ./cmd/contract-capture` directly after exporting the six environment variables shown in `deploy/contract-capture/compose.yaml`.
 
