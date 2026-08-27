@@ -87,9 +87,7 @@ func TestMissStreamsThenPublishesAndBecomesLocalHit(t *testing.T) {
 	if response.Header.Get("X-Package-Source") != "JCDS" {
 		t.Fatalf("first X-Package-Source = %q", response.Header.Get("X-Package-Source"))
 	}
-	if _, err := os.Stat(finalPath); err != nil {
-		t.Fatalf("final package was not published: %v", err)
-	}
+	waitForFile(t, finalPath)
 
 	secondResponse, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
 	if err != nil {
@@ -102,6 +100,22 @@ func TestMissStreamsThenPublishesAndBecomesLocalHit(t *testing.T) {
 	}
 	if got := resolver.calls.Load(); got != 1 {
 		t.Fatalf("resolver calls = %d, want 1", got)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect final package: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("final package was not published within %s", time.Second)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
