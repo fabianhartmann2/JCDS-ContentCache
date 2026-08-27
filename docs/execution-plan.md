@@ -100,6 +100,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Add Dockerfiles and a local Docker Compose stack.
 - [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
 - [x] Add structured logs with automatic sensitive-field exclusion.
+- [x] Add privacy-safe NGINX client-behavior records for method, range class, response source/status, bytes, timing and completion, with request IDs and automated disclosure tests.
 - [x] Add basic liveness and readiness endpoints.
 - [x] Verify catalog length and SHA3-512 before atomic publication.
 

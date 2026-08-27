@@ -403,9 +403,9 @@ Host and container egress should be restricted to the Jamf tenant, approved JCDS
 
 ### NFR-009 Auditability
 
-Operational logs must contain timestamp, request/correlation ID, sanitized package name, result status, package source (LOCAL or JCDS), byte count, duration and high-level error category. Client tokens, Jamf tokens, client secrets and signed query strings must never be logged.
+The standard NGINX client-behavior log must contain timestamp, source client address, coarse client class, request/correlation ID, connection identifiers, HTTP protocol, method, range class, If-Range presence, result status, package source (LOCAL or JCDS), response range/length presence, byte count, duration, upstream status/timing and request completion. It must not contain the URI, package name, query string, raw Range or User-Agent values, Authorization, cookies, referrer, client tokens, Jamf tokens, client secrets or signed URLs. Source addresses are client-identifying operational data and require restricted access and an approved retention period.
 
-> **Priority: Must. Acceptance:** A reviewed log sample supports incident diagnosis without sensitive fields.
+> **Priority: Must. Acceptance:** Automated tests prove the behavior schema and representative GET, HEAD, start-at-zero, resumed, multi-range, local, upstream and error classifications; a disclosure check finds none of the excluded fields or values.
 
 ### NFR-010 Observability
 
@@ -582,6 +582,8 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | Observability   | log format/level, metrics listener, correlation header and monitoring destination                                                 |
 
 ### 13.3 Monitoring and alerting
+
+The baseline NGINX behavior-log schema and privacy boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata, but it must not reintroduce the excluded URI, package identity, raw headers, credentials or signed URLs.
 
 - Alert when the service or helper is not ready for longer than the agreed grace period.
 
