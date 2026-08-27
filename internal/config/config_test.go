@@ -22,6 +22,9 @@ func validConfig() Config {
 		FillTimeout:          time.Hour,
 		ShutdownTimeout:      time.Minute,
 		MaxPackageBytes:      1024,
+		MinFreeBytes:         128,
+		MinFreePercent:       20,
+		TempFileMaxAge:       24 * time.Hour,
 	}
 }
 
@@ -58,5 +61,46 @@ func TestValidateRequiresHTTPSCatalogURL(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "JAMF_CATALOG_URL must use HTTPS") {
 		t.Fatalf("Validate() error = %v, want catalog HTTPS error", err)
+	}
+}
+
+func TestValidateRejectsInvalidCapacityConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "negative free bytes",
+			mutate: func(cfg *Config) {
+				cfg.MinFreeBytes = -1
+			},
+			want: "MIN_FREE_BYTES",
+		},
+		{
+			name: "free percent reaches 100",
+			mutate: func(cfg *Config) {
+				cfg.MinFreePercent = 100
+			},
+			want: "MIN_FREE_PERCENT",
+		},
+		{
+			name: "temporary age is zero",
+			mutate: func(cfg *Config) {
+				cfg.TempFileMaxAge = 0
+			},
+			want: "TEMP_FILE_MAX_AGE",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %s error", err, test.want)
+			}
+		})
 	}
 }

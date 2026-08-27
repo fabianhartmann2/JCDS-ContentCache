@@ -28,6 +28,9 @@ type Config struct {
 	FillTimeout          time.Duration
 	ShutdownTimeout      time.Duration
 	MaxPackageBytes      int64
+	MinFreeBytes         int64
+	MinFreePercent       float64
+	TempFileMaxAge       time.Duration
 }
 
 func Load() (Config, error) {
@@ -57,6 +60,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.MaxPackageBytes, err = parseInt64("MAX_PACKAGE_BYTES", 25*1024*1024*1024); err != nil {
+		return Config{}, err
+	}
+	if cfg.MinFreeBytes, err = parseInt64("MIN_FREE_BYTES", 10*1024*1024*1024); err != nil {
+		return Config{}, err
+	}
+	if cfg.MinFreePercent, err = parseFloat64("MIN_FREE_PERCENT", 20); err != nil {
+		return Config{}, err
+	}
+	if cfg.TempFileMaxAge, err = parseDuration("TEMP_FILE_MAX_AGE", 24*time.Hour); err != nil {
 		return Config{}, err
 	}
 
@@ -126,6 +138,15 @@ func (c Config) Validate() error {
 	if c.MaxPackageBytes <= 0 {
 		validationErrors = append(validationErrors, errors.New("MAX_PACKAGE_BYTES must be greater than zero"))
 	}
+	if c.MinFreeBytes < 0 {
+		validationErrors = append(validationErrors, errors.New("MIN_FREE_BYTES must not be negative"))
+	}
+	if c.MinFreePercent < 0 || c.MinFreePercent >= 100 {
+		validationErrors = append(validationErrors, errors.New("MIN_FREE_PERCENT must be at least zero and less than 100"))
+	}
+	if c.TempFileMaxAge <= 0 {
+		validationErrors = append(validationErrors, errors.New("TEMP_FILE_MAX_AGE must be greater than zero"))
+	}
 
 	return errors.Join(validationErrors...)
 }
@@ -167,6 +188,18 @@ func parseInt64(name string, fallback int64) (int64, error) {
 		return fallback, nil
 	}
 	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", name, err)
+	}
+	return parsed, nil
+}
+
+func parseFloat64(name string, fallback float64) (float64, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", name, err)
 	}

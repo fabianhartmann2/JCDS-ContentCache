@@ -39,7 +39,7 @@ type Provider struct {
 
 	mu         sync.Mutex
 	token      string
-	expiresAt  time.Time
+	refreshAt  time.Time
 	refreshing bool
 	wait       chan struct{}
 }
@@ -58,7 +58,7 @@ func NewProvider(client *http.Client, tokenURL, clientID, clientSecret string, e
 func (p *Provider) Token(ctx context.Context) (string, error) {
 	for {
 		p.mu.Lock()
-		if p.token != "" && p.now().Add(p.expirySkew).Before(p.expiresAt) {
+		if p.token != "" && p.now().Before(p.refreshAt) {
 			token := p.token
 			p.mu.Unlock()
 			return token, nil
@@ -78,12 +78,12 @@ func (p *Provider) Token(ctx context.Context) (string, error) {
 		p.wait = make(chan struct{})
 		p.mu.Unlock()
 
-		token, expiresAt, err := p.fetch(ctx)
+		token, refreshAt, err := p.fetch(ctx)
 
 		p.mu.Lock()
 		if err == nil {
 			p.token = token
-			p.expiresAt = expiresAt
+			p.refreshAt = refreshAt
 		}
 		p.refreshing = false
 		close(p.wait)
@@ -99,7 +99,7 @@ func (p *Provider) Token(ctx context.Context) (string, error) {
 func (p *Provider) Invalidate() {
 	p.mu.Lock()
 	p.token = ""
-	p.expiresAt = time.Time{}
+	p.refreshAt = time.Time{}
 	p.mu.Unlock()
 }
 
@@ -148,7 +148,18 @@ func (p *Provider) fetch(ctx context.Context) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("%w: OAuth response contained invalid expires_in", ErrInvalidResponse)
 	}
 
-	return payload.AccessToken, p.now().Add(time.Duration(expiresIn) * time.Second), nil
+	lifetime := time.Duration(expiresIn) * time.Second
+	skew := p.expirySkew
+	// Jamf may issue tokens whose entire lifetime is shorter than the configured
+	// safety margin. Clamp the margin to 20% of the observed lifetime so a valid
+	// short-lived token is still reused while retaining an early-refresh window.
+	if maximumSkew := lifetime / 5; skew > maximumSkew {
+		skew = maximumSkew
+	}
+	if skew < 0 {
+		skew = 0
+	}
+	return payload.AccessToken, p.now().Add(lifetime - skew), nil
 }
 
 func tokenRequestFailure(err error) error {

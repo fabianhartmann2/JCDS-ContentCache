@@ -26,7 +26,7 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Build binaries
-        run: go build ./cmd/cache-helper ./cmd/mock-upstream
+        run: go build ./cmd/cache-helper ./cmd/mock-upstream ./cmd/contract-capture
       - name: Build container image
         run: docker build --tag jcds-content-cache:ci .
       - name: Docker Compose smoke test

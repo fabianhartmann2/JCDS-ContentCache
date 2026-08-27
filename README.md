@@ -29,7 +29,7 @@ Milestone M1 demonstrates the complete local lifecycle without credentials:
 12. Local packages remain available during a simulated Jamf/JCDS outage, while a missing package receives a controlled `502` response.
 13. OAuth, Jamf API, redirect, and object failures are categorized without returning dependency bodies or logging complete request URLs.
 
-The v1 prototype accepts one filename segment ending in `.pkg`. This is a provisional implementation of open question OQ-11, not yet a final production decision.
+The confirmed v1 contract accepts exactly one flat filename segment ending in lowercase `.pkg`. Nested paths and additional file types are deliberately outside the first release. Initial sizing targets 500–2,000 managed Macs and 500 GB–1 TB of usable cache storage with at least 20 percent operational headroom.
 
 ## Local demonstration
 
@@ -66,7 +66,7 @@ Add `-v` only when you intentionally want to delete the local package-store volu
 ```bash
 go test -race ./...
 go vet ./...
-go build ./cmd/cache-helper ./cmd/mock-upstream
+go build ./cmd/cache-helper ./cmd/mock-upstream ./cmd/contract-capture
 ```
 
 CI also builds the container image. No test fixture contains a real token, secret, signed URL, or package.
@@ -79,11 +79,29 @@ tests/integration/compose_smoke.sh
 
 It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms that the completed package remains locally available after restart and during an upstream outage.
 
+## Sanitized live-contract capture
+
+After a dedicated read-only Jamf API client is available, an administrator can validate the live success contracts without printing the access token, client secret, tenant hostname, package name, package size, hashes, signed URL, object path or query values:
+
+```bash
+export JAMF_TOKEN_URL="https://<tenant-host>/api/v1/oauth/token"
+export JAMF_CLIENT_ID="<client-id>"
+export JAMF_CLIENT_SECRET="<client-secret>"
+export JAMF_CATALOG_URL="https://<tenant-host>/api/v1/jcds/files"
+export JAMF_RESOLVER_URL_TEMPLATE="https://<tenant-host>/api/v1/jcds/files/{filename}"
+export CAPTURE_PACKAGE_NAME="<existing-flat-package-name>.pkg"
+
+go run ./cmd/contract-capture > sanitized-contract-report.json
+```
+
+Run this locally; do not commit the environment values or raw API responses. The generated report contains only JSON field types, expiry seconds, metadata-presence checks, digest lengths and a truncated SHA-256 hostname fingerprint for comparing destination stability.
+
 ## Repository map
 
 ```text
 cmd/cache-helper/       Go service entry point
 cmd/mock-upstream/      Credential-free development upstream
+cmd/contract-capture/   Sanitized live-contract validation tool
 internal/auth/          OAuth token reuse and refresh
 internal/config/        Environment parsing and validation
 internal/download/      Download URL and redirect policy
@@ -106,6 +124,7 @@ docs/                   Requirements, execution plan and contract evidence
 - Never commit Jamf client credentials, OAuth tokens, temporary signed URLs, or unsanitized API responses.
 - The helper accepts only a validated package filename and never accepts a client-supplied upstream URL.
 - Every resolved URL and redirect is checked against the configured hostname allowlist.
+- In production mode, every allowed download hostname is resolved before use and the request is rejected if any returned address is private, loopback or link-local.
 - Dependency response bodies and complete request URLs are excluded from propagated errors so temporary signed queries cannot enter normal logs.
 - Jamf catalog length and SHA3-512 metadata are verified before a downloaded file is published.
 - MD5 is parsed for interoperability but is not used as the security integrity boundary.

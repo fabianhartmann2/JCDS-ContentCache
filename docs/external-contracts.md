@@ -1,6 +1,6 @@
 # External contract evidence
 
-**Status:** Sanitized resolver, not-found, metadata, and top-level catalog contracts captured; redirect and remaining error contracts are open  
+**Status:** Sanitized OAuth-success, resolver, not-found, metadata, and top-level catalog contracts captured; redirect and remaining error contracts are open  
 **Related questions:** OQ-01, OQ-05, OQ-06, OQ-12, and OQ-13
 
 Do not add credentials, access tokens, cookies, signed query parameters, tenant-sensitive package names, package digests, or internal hostnames to this file.
@@ -10,10 +10,23 @@ Do not add credentials, access tokens, cookies, signed query parameters, tenant-
 - Token endpoint: Official Jamf documentation specifies `POST /api/v1/oauth/token`; confirm the exact path in the target tenant.
 - Request content type: `application/x-www-form-urlencoded`
 - Required fields: `client_id`, `client_secret`, and `grant_type=client_credentials`
-- Successful response fields:
-- Expiry behavior:
+- Successful response fields: `access_token` (string), `scope` (string), `token_type` (string with observed value `Bearer`), and `expires_in` (number of seconds)
+- Expiry behavior: An observed successful response used `expires_in: 59`. The helper clamps its configured early-refresh margin to 20 percent of a shorter observed lifetime so the same valid token can be reused instead of being refreshed for every API call.
 - Error status and body shapes:
 - Provisional adapter behavior while the exact error bodies remain unknown: classify by HTTP status, discard the bounded response body, and never propagate it or the complete token URL into a client response or normal error log.
+
+### Sanitized successful response
+
+```json
+{
+  "access_token": "<redacted>",
+  "scope": "<api-role-redacted>",
+  "token_type": "Bearer",
+  "expires_in": 59
+}
+```
+
+The adapter ignores unknown additional fields, requires a non-empty access token and positive numeric expiry, and accepts the token type case-insensitively only when it is `Bearer`.
 
 ## Jamf file-resolution contract
 

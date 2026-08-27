@@ -4,7 +4,7 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.4
+**Version:** 0.5
 
 **Date:** 27 August 2026
 
@@ -126,6 +126,9 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Store rebuild          | The package store is derived data and can be rebuilt from JCDS; configuration and secrets require backup, package contents do not.                                         | Baseline assumption |
 | Jamf API version       | Use the deprecated v1 JCDS resolver and file-list endpoints until Jamf introduces replacements; isolate both behind adapters.                                              | Resolved            |
 | Publication integrity  | Require exact JCDS catalog `length` and SHA3-512 match before a downloaded package is atomically published.                                                                 | Resolved            |
+| V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
+| Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
+| Cache storage          | Provision 500 GB–1 TB of usable cache storage and retain at least 20 percent operational headroom.                                                                          | Resolved range      |
 
 > **Normative language:** Must indicates a mandatory production requirement. Should indicates a recommended requirement that may only be waived through a documented design decision. May identifies an optional capability.
 
@@ -364,7 +367,7 @@ A local hit should add minimal application overhead and use the available host/n
 
 ### NFR-003 Scalability
 
-The first release must support the agreed managed-client population, active-download concurrency, package size and working-set capacity with at least 20 percent storage headroom. The design should permit later migration to larger storage or a redundant deployment.
+The first release must support 500–2,000 managed Macs, the measured active-download concurrency, package-size distribution and working-set capacity with at least 20 percent storage headroom. The design should permit later migration to larger storage or a redundant deployment.
 
 > **Priority: Must. Acceptance:** Capacity calculations and stress tests cover the agreed peak profile.
 
@@ -480,7 +483,7 @@ The token request uses the client-credentials grant and application/x-www-form-u
 
 - scope only if explicitly required and approved for the configured Jamf API client
 
-The helper must parse access_token, token_type and expires_in from a successful response, require a Bearer token type where supplied, and refresh with a safety margin. A recommended starting margin is 60 seconds, subject to the returned lifetime and testing.
+The helper must parse `access_token`, `token_type` and `expires_in` from a successful response, require a Bearer token type where supplied, tolerate the observed additional string `scope` field, and refresh with a safety margin. Because the observed lifetime is 59 seconds, a configured 60-second margin must be adaptively clamped; the baseline implementation uses no more than 20 percent of the returned lifetime so the token remains reusable while still refreshing early.
 
 ### 11.4 Filesystem mapping contract
 
@@ -516,7 +519,7 @@ The paths above define the baseline layout and may be changed through configurat
 
 > **Initial sizing formula:** Usable package-store capacity should be at least the expected active package working set plus concurrent temporary-download allowance, multiplied by 1.20 for operational headroom. The final value must be calculated from actual JCDS package inventory and download demand.
 
-A provisional 500 GB package store may be used for design validation, but it is not a committed production requirement until package inventory, maximum object size and demand are measured.
+The first deployment must provide 500 GB–1 TB of usable cache storage. At least 20 percent must remain as operational headroom, so the planned active package working set should remain within approximately 400 GB–800 GB depending on the selected volume size. Package inventory, maximum object size and simultaneous-fill demand must still be measured before final host sizing and load-test limits are frozen.
 
 ### 12.3 Retention and cleanup
 
@@ -682,10 +685,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Use server-authenticated TLS plus enterprise network allowlisting for the first internal deployment; add mTLS if clients can reach the service from untrusted networks.
 - **Required by:** Security design
 
-#### OQ-03 — Workload and capacity (OPEN)
+#### OQ-03 — Workload and capacity (IN REVIEW)
 
-- **Decision required:** How many Macs, concurrent downloads, packages, total working-set bytes and maximum package size must be supported?
-- **Recommended default:** Measure recent inventory and demand; size the package store for the active working set, concurrent temporary files and 20 percent headroom.
+- **Confirmed range:** The first release must support 500–2,000 managed Macs.
+- **Decision still required:** What package count, total working-set bytes, maximum package size and peak simultaneous-fill count must be supported?
+- **Recommended next step:** Measure recent inventory and demand, then load-test the active working set and concurrent temporary allowance with 20 percent headroom.
 - **Required by:** Detailed design and procurement
 
 #### OQ-04 — Availability objective (OPEN)
@@ -707,10 +711,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Configure exact observed hostnames at deployment time, collect more sanitized samples, revalidate each redirect and reject wildcard CloudFront, non-HTTPS and private destinations.
 - **Required by:** Security design
 
-#### OQ-07 — Store retention and size (OPEN)
+#### OQ-07 — Store retention and size (IN REVIEW)
 
-- **Decision required:** What maximum package-store usage, minimum retention period and cleanup selection policy should be configured?
-- **Recommended default:** Start design validation at 500 GB and 180 days minimum inactivity before cleanup; replace these with measured values before go-live. No freshness expiry is required for immutable names.
+- **Confirmed range:** The first host will provide 500 GB–1 TB of usable cache storage with at least 20 percent operational headroom.
+- **Decision still required:** What minimum retention period and cleanup selection policy should be configured?
+- **Recommended default:** Start with 180 days minimum inactivity before cleanup and validate it against inventory/reuse data. No freshness expiry is required for immutable names.
 - **Required by:** Detailed design
 
 #### OQ-08 — TLS ownership (OPEN)
@@ -731,11 +736,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Integrate with the existing enterprise platform and expose Prometheus-compatible metrics if that matches current standards.
 - **Required by:** Operations readiness
 
-#### OQ-11 — Path model (OPEN)
+#### OQ-11 — Path model (RESOLVED)
 
-- **Decision required:** Will the namespace contain filenames only, or must it support nested subpaths and additional file types?
-- **Recommended default:** Limit the first release to one canonical filename segment ending in `.pkg`; add other types or nested paths only with explicit validation and filesystem-mapping rules.
-- **Required by:** API contract freeze
+- **Decision:** The first release accepts exactly one canonical filename segment ending in lowercase `.pkg`.
+- **Excluded:** Nested paths, additional file types, uppercase `.PKG`, client-supplied URLs and query-selected destinations.
+- **Required follow-up:** Retain positive and negative validation tests; any broader namespace requires an approved scope and threat-model update.
 
 #### OQ-12 — Integrity metadata (RESOLVED)
 
@@ -759,13 +764,15 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-04   | Jamf API lifecycle     | Use the deprecated JCDS resolver and catalog endpoints until Jamf introduces replacements; keep both behind replaceable adapters.                                |
 | D-05   | Publication integrity  | Require catalog length and SHA3-512 verification before atomic publication; do not treat MD5 as the security boundary.                                           |
 | D-06   | Catalog response       | Treat the observed JCDS metadata response as one complete top-level JSON array; fail closed on a future detected partial envelope.                                |
-| D-04   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
+| D-07   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
+| D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
+| D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
 
 ## 17. Delivery plan
 
 | **Phase**                  | **Main activities**                                                                                                                       | **Exit evidence**                                              |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| 1\. Contract validation    | Confirm Jamf API replacement/response, client HTTP behaviour, JCDS domains, API privilege and workload data.                              | Resolved OQ-01, OQ-03, OQ-05 and OQ-06; redacted API fixtures. |
+| 1\. Contract validation    | Confirm Jamf API replacement/response, client HTTP behaviour, JCDS domains, API privilege and workload data.                              | Resolved OQ-01; confirmed population range; measured OQ-03/OQ-05/OQ-06 evidence; redacted API fixtures. |
 | 2\. Detailed design        | Finalize component contract, filesystem-store/range strategy, cleanup policy, network policy, secrets, TLS, monitoring, capacity and SLO. | Approved technical and security design.                        |
 | 3\. Build                  | Implement the Go helper, NGINX configuration, container images, deployment definition, metrics and runbook draft.                         | Versioned deployable artifacts and automated tests.            |
 | 4\. Integration test       | Validate Jamf/JCDS interaction, streaming, filesystem mapping, local-store semantics, Mac client compatibility and failure handling.      | Acceptance evidence for functional requirements.               |
@@ -786,7 +793,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 5.  Assign DNS/TLS, secrets, monitoring and operational ownership (OQ-08 to OQ-10).
 
-6.  Freeze the client path contract (OQ-11) and verify the resolved integrity policy (OQ-12) in production-like tests.
+6.  Retain regression coverage for the resolved path contract (OQ-11) and verify the resolved integrity policy (OQ-12) in production-like tests.
 
 ## Appendix A. Error handling matrix
 

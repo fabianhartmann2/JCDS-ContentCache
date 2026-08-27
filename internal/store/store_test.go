@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestValidateFilename(t *testing.T) {
@@ -88,5 +89,100 @@ func TestAbortDoesNotPublishFile(t *testing.T) {
 	}
 	if _, _, err := packageStore.Open("ExampleFile.pkg"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Open() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestReserveCapacityAccountsForHeadroomAndConcurrentFills(t *testing.T) {
+	root := t.TempDir()
+	packageStore, err := New(filepath.Join(root, "packages"), filepath.Join(root, ".temporary"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	packageStore.space = func() (int64, int64, error) {
+		return 1000, 1000, nil
+	}
+
+	releaseFirst, err := packageStore.ReserveCapacity(400, 100, 20)
+	if err != nil {
+		t.Fatalf("first ReserveCapacity() error = %v", err)
+	}
+	defer releaseFirst()
+
+	if _, err := packageStore.ReserveCapacity(500, 100, 20); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("second ReserveCapacity() error = %v, want ErrInsufficientSpace", err)
+	}
+
+	releaseFirst()
+	releaseSecond, err := packageStore.ReserveCapacity(500, 100, 20)
+	if err != nil {
+		t.Fatalf("ReserveCapacity() after release error = %v", err)
+	}
+	releaseSecond()
+}
+
+func TestCleanupStaleTemporaryRemovesOnlyOldRegularPartFiles(t *testing.T) {
+	root := t.TempDir()
+	tempRoot := filepath.Join(root, ".temporary")
+	packageStore, err := New(filepath.Join(root, "packages"), tempRoot)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	now := time.Date(2026, time.August, 27, 12, 0, 0, 0, time.UTC)
+	oldPart := filepath.Join(tempRoot, ".Old.pkg.123.part")
+	newPart := filepath.Join(tempRoot, ".New.pkg.456.part")
+	unrelated := filepath.Join(tempRoot, "operator-note.txt")
+	for _, path := range []string{oldPart, newPart, unrelated} {
+		if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+	}
+	if err := os.Chtimes(oldPart, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+	if err := os.Chtimes(newPart, now.Add(-30*time.Minute), now.Add(-30*time.Minute)); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+
+	removed, err := packageStore.CleanupStaleTemporary(time.Hour, now)
+	if err != nil {
+		t.Fatalf("CleanupStaleTemporary() error = %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(oldPart); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old part still exists, error = %v", err)
+	}
+	for _, path := range []string{newPart, unrelated} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected retained file %q: %v", path, err)
+		}
+	}
+}
+
+func TestOpenRejectsSymlinkWithoutFollowingIt(t *testing.T) {
+	root := t.TempDir()
+	storeRoot := filepath.Join(root, "packages")
+	packageStore, err := New(storeRoot, filepath.Join(root, ".temporary"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	target := filepath.Join(root, "outside.pkg")
+	if err := os.WriteFile(target, []byte("outside content"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(storeRoot, "Linked.pkg")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	file, _, err := packageStore.Open("Linked.pkg")
+	if file != nil {
+		file.Close()
+		t.Fatal("Open() returned a file for a symbolic link")
+	}
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("Open() error = %v, want a non-regular-file rejection", err)
 	}
 }

@@ -58,6 +58,9 @@ services:
       FILL_TIMEOUT: 10m
       SHUTDOWN_TIMEOUT: 30s
       MAX_PACKAGE_BYTES: "1073741824"
+      MIN_FREE_BYTES: "0"
+      MIN_FREE_PERCENT: "0"
+      TEMP_FILE_MAX_AGE: 1h
     read_only: true
     volumes:
       - package-store:/srv/jamf-store

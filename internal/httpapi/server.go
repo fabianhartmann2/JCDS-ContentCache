@@ -36,6 +36,8 @@ type Server struct {
 	downloader      objectSource
 	fillTimeout     time.Duration
 	maxPackageBytes int64
+	minFreeBytes    int64
+	minFreePercent  float64
 }
 
 func New(
@@ -46,6 +48,8 @@ func New(
 	downloader objectSource,
 	fillTimeout time.Duration,
 	maxPackageBytes int64,
+	minFreeBytes int64,
+	minFreePercent float64,
 ) *Server {
 	return &Server{
 		logger:          logger,
@@ -56,6 +60,8 @@ func New(
 		downloader:      downloader,
 		fillTimeout:     fillTimeout,
 		maxPackageBytes: maxPackageBytes,
+		minFreeBytes:    minFreeBytes,
+		minFreePercent:  minFreePercent,
 	}
 }
 
@@ -152,6 +158,11 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 	if metadata.Length > s.maxPackageBytes {
 		return errors.New("Jamf catalog length exceeds the configured maximum package size")
 	}
+	releaseCapacity, err := s.store.ReserveCapacity(metadata.Length, s.minFreeBytes, s.minFreePercent)
+	if err != nil {
+		return err
+	}
+	defer releaseCapacity()
 
 	downloadURL, err := s.resolver.Resolve(ctx, filename)
 	if err != nil {
@@ -269,6 +280,10 @@ func (s *Server) writeError(w http.ResponseWriter, filename string, err error) {
 		status = http.StatusRequestTimeout
 		message = "package request was canceled"
 		category = "request_canceled"
+	case errors.Is(err, store.ErrInsufficientSpace):
+		status = http.StatusInsufficientStorage
+		message = "package store has insufficient free space"
+		category = "store_capacity_exhausted"
 	case errors.Is(err, auth.ErrInvalidResponse):
 		message = "package source is unavailable"
 		category = "oauth_response_invalid"

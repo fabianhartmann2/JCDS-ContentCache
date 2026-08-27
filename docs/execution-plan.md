@@ -1,7 +1,7 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
 **Status:** Active working plan  
-**Version:** 0.4  
+**Version:** 0.5  
 **Date:** 27 August 2026  
 **Owner:** Mac Workplace  
 **Target:** Production service on one managed Linux container host
@@ -25,6 +25,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Package identity | Filenames are immutable; one filename always identifies the same bytes |
 | Deployment | NGINX and a Go helper run as containers on one Linux host |
 | Client namespace | `https://<server>:8443/packages/<filename>.pkg` |
+| V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
+| Initial client population | 500–2,000 managed Macs |
+| Initial usable cache storage | 500 GB–1 TB, retaining 20% operational headroom |
 | Local storage | URL-derived, filename-preserving files below `/srv/jamf-store/packages/` |
 | Local hit | NGINX serves the completed file directly |
 | Store miss | NGINX routes internally to the helper |
@@ -60,14 +63,15 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Record the precise field containing the temporary download URL (`uri`).
 - [x] Capture sanitized JCDS file-list metadata fields: `fileName`, `length`, `md5`, `region`, and `sha3`.
 - [x] Confirm that the complete file-list response is a top-level JSON array without a pagination envelope.
-- [ ] Record OAuth token response fields, expiry behavior and relevant error responses.
+- [x] Record OAuth token success fields and observed expiry behavior; relevant error responses remain open.
 - [ ] Identify approved JCDS hostnames and every permitted redirect destination.
 - [x] Establish JCDS catalog `length` and SHA3-512 as the publication-integrity source of truth.
 - [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, and range support.
 - [ ] Capture representative Mac client requests for `GET`, `HEAD`, single-range resume and any multi-range behavior.
 - [x] Implement and test the provisional rule that a store miss always fetches a complete object even when the client requests a range.
-- [ ] Confirm the v1 path model: one filename segment ending in `.pkg`, or nested subdirectories.
-- [ ] Record findings in `docs/external-contracts.md`; include only sanitized examples.
+- [x] Confirm the v1 path model as one filename segment ending in lowercase `.pkg`, without nested subdirectories or additional file types.
+- [x] Record current findings in `docs/external-contracts.md`; include only sanitized examples.
+- [x] Add a local contract-capture command that emits only schema types, expiry seconds, metadata-presence checks, digest lengths and a hostname fingerprint.
 
 **Exit criteria**
 
@@ -113,8 +117,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 **Goal:** Make the vertical slice safe and predictable under hostile input and dependency failures.
 
-- [ ] Enforce method, path length, character and extension restrictions.
-- [ ] Reject traversal, encoded traversal, ambiguous encoding, absolute URLs, query-based destinations and symlink escapes.
+- [x] Enforce method, path length, character and extension restrictions for the confirmed flat lowercase `.pkg` namespace.
+- [x] Reject traversal, encoded traversal, ambiguous encoding, absolute URLs, query-based destinations and symlink escapes.
 - [ ] Apply inbound network controls and the selected client-authentication policy.
 - [ ] Apply outbound DNS, host, port and redirect restrictions.
 - [ ] Deliver the Jamf client secret through the selected secret platform.
@@ -123,8 +127,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
 - [ ] Add bounded connect, header, read, idle and total-operation timeouts.
 - [ ] Add bounded retries with backoff only for safe transient operations.
-- [ ] Add maximum object size and minimum-free-space protections.
-- [ ] Add temporary-file cleanup after failure, restart and age threshold.
+- [x] Add maximum object size and minimum-free-space protections.
+- [x] Add startup cleanup for stale regular `.part` files after the configured age threshold.
 - [x] Require Jamf catalog length and SHA3-512 validation before publishing a downloaded package; retain MD5 for interoperability only.
 - [ ] Add non-root containers, read-only root filesystems where practical and minimal Linux capabilities.
 - [ ] Add dependency, image and source scanning to CI.
@@ -187,11 +191,11 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-01 | Jamf file-resolution API contract | Blocking | RESOLVED | Use deprecated `GET /api/v1/jcds/files/{fileName}` and parse `uri` until Jamf introduces a replacement; map the observed 404 payload to not found | Monitor Jamf deprecation notices; capture remaining non-404 error responses for resilience tests |
 | OQ-05 | Client and upstream range-request behavior | Blocking | OPEN | Capture real client traffic; on a miss fetch and publish the full object | `GET`, `HEAD`, resume and multi-range captures; JCDS response behavior |
 | OQ-06 | Permitted JCDS hosts and redirects | Blocking | IN REVIEW | One exact CloudFront distribution class is observed; allow exact configured hostnames only and revalidate redirects | Additional production samples and redirect behavior; approved runtime hostname inventory |
-| OQ-11 | Flat filenames or nested paths | Blocking | OPEN | V1 accepts one filename segment ending in `.pkg` | Required package naming examples and collision analysis |
+| OQ-11 | Flat filenames or nested paths | Blocking | RESOLVED | V1 accepts exactly one filename segment ending in lowercase `.pkg`; nested paths and other types are out of scope | User-confirmed v1 scope; validation and negative tests |
 | OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
-| OQ-03 | Package workload and concurrency | High | OPEN | Measure before fixing performance limits | Package count/size distribution, peak clients, common simultaneous requests |
-| OQ-07 | Store capacity and retention | High | OPEN | Treat 500 GB and 180 days as provisional only | Inventory growth, reuse interval, disk budget and operational cleanup policy |
+| OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
+| OQ-07 | Store capacity and retention | High | IN REVIEW | Provision 500 GB–1 TB usable cache storage and retain 20% headroom; retention/eviction policy remains open | Inventory growth, reuse interval, and operational cleanup policy |
 | OQ-02 | Client access control | High | OPEN | Server TLS plus enterprise-network allowlist; add mTLS if network trust is insufficient | Client network paths, proxy/VPN behavior and security policy |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | OPEN | Enterprise DNS and automatically renewed enterprise PKI certificate | DNS owner, certificate platform and renewal responsibility |
@@ -205,7 +209,7 @@ Repository scaffolding and mock-driven implementation can begin immediately. Rea
 - [x] OQ-01 has a sanitized successful and not-found contract plus an explicit deprecated-endpoint decision.
 - [ ] OQ-05 has enough evidence to select the miss/range policy.
 - [ ] OQ-06 has an enforceable destination and redirect allowlist.
-- [ ] OQ-11 fixes the canonical path model.
+- [x] OQ-11 fixes the canonical path model.
 - [x] OQ-13 fixes the catalog response as a complete top-level JSON array.
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
@@ -274,5 +278,5 @@ The first coding milestone is a local, credential-free demonstration using mock 
 1. Capture sanitized unauthorized, throttled and server-error Jamf response shapes to validate the implemented status-driven, body-agnostic mappings against the real tenant.
 2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range traffic to resolve OQ-05.
 3. Confirm the production JCDS hostname inventory and whether real resolver URLs redirect, then resolve OQ-06.
-4. Decide whether v1 permanently uses one flat `.pkg` filename segment, resolving OQ-11.
+4. Measure package inventory, largest object and simultaneous fill demand to finish OQ-03 and select the retention policy for OQ-07.
 5. Enable default-branch protection and require the passing CI workflow when repository settings permit.

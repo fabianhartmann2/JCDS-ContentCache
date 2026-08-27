@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -22,6 +23,11 @@ var (
 type Policy struct {
 	allowedHosts map[string]struct{}
 	allowHTTP    bool
+	resolver     hostnameResolver
+}
+
+type hostnameResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
 }
 
 func NewPolicy(allowedHosts []string, allowHTTP bool) Policy {
@@ -29,7 +35,13 @@ func NewPolicy(allowedHosts []string, allowHTTP bool) Policy {
 	for _, host := range allowedHosts {
 		hosts[strings.ToLower(strings.TrimSpace(host))] = struct{}{}
 	}
-	return Policy{allowedHosts: hosts, allowHTTP: allowHTTP}
+	return Policy{allowedHosts: hosts, allowHTTP: allowHTTP, resolver: net.DefaultResolver}
+}
+
+func newPolicyWithResolver(allowedHosts []string, allowHTTP bool, resolver hostnameResolver) Policy {
+	policy := NewPolicy(allowedHosts, allowHTTP)
+	policy.resolver = resolver
+	return policy
 }
 
 func (p Policy) Validate(rawURL string) (*url.URL, error) {
@@ -64,6 +76,25 @@ func (p Policy) Validate(rawURL string) (*url.URL, error) {
 	return parsed, nil
 }
 
+func (p Policy) validateResolvedDestination(ctx context.Context, parsed *url.URL) error {
+	// Explicit HTTP support exists only for the credential-free local mock
+	// stack, where loopback and container-private addresses are expected.
+	if p.allowHTTP {
+		return nil
+	}
+	addresses, err := p.resolver.LookupNetIP(ctx, "ip", parsed.Hostname())
+	if err != nil || len(addresses) == 0 {
+		return fmt.Errorf("%w: destination hostname could not be resolved", ErrUnavailable)
+	}
+	for _, address := range addresses {
+		address = address.Unmap()
+		if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() {
+			return policyViolation("hostname resolves to a non-public address")
+		}
+	}
+	return nil
+}
+
 type Client struct {
 	httpClient      *http.Client
 	policy          Policy
@@ -76,8 +107,11 @@ func NewClient(baseClient *http.Client, policy Policy, maxPackageBytes int64) *C
 		if len(via) >= 5 {
 			return policyViolation("too many redirects")
 		}
-		_, err := policy.Validate(req.URL.String())
-		return err
+		parsed, err := policy.Validate(req.URL.String())
+		if err != nil {
+			return err
+		}
+		return policy.validateResolvedDestination(req.Context(), parsed)
 	}
 	return &Client{
 		httpClient:      &clientCopy,
@@ -89,6 +123,9 @@ func NewClient(baseClient *http.Client, policy Policy, maxPackageBytes int64) *C
 func (c *Client) Open(ctx context.Context, rawURL string) (*http.Response, error) {
 	parsed, err := c.policy.Validate(rawURL)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.policy.validateResolvedDestination(ctx, parsed); err != nil {
 		return nil, err
 	}
 

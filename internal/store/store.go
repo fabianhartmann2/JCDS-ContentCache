@@ -6,14 +6,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
-var ErrNotFound = errors.New("package is not stored locally")
+var (
+	ErrNotFound          = errors.New("package is not stored locally")
+	ErrInsufficientSpace = errors.New("package store has insufficient free space")
+)
 
 type Store struct {
-	root     string
-	tempRoot string
+	root          string
+	tempRoot      string
+	capacityMu    sync.Mutex
+	reservedBytes int64
+	space         func() (availableBytes int64, totalBytes int64, err error)
 }
 
 func New(root, tempRoot string) (*Store, error) {
@@ -37,7 +45,15 @@ func New(root, tempRoot string) (*Store, error) {
 		return nil, errors.New("store and temporary roots must be on the same filesystem")
 	}
 
-	return &Store{root: filepath.Clean(root), tempRoot: filepath.Clean(tempRoot)}, nil
+	cleanRoot := filepath.Clean(root)
+	cleanTempRoot := filepath.Clean(tempRoot)
+	return &Store{
+		root:     cleanRoot,
+		tempRoot: cleanTempRoot,
+		space: func() (int64, int64, error) {
+			return filesystemSpace(cleanTempRoot)
+		},
+	}, nil
 }
 
 func (s *Store) Open(filename string) (*os.File, os.FileInfo, error) {
@@ -94,6 +110,87 @@ func (s *Store) Ready() error {
 		}
 	}
 	return nil
+}
+
+// ReserveCapacity rejects a fill before any upstream object bytes are fetched
+// when the expected package plus configured headroom would overcommit the
+// package-store filesystem. Reservations are process-local and deliberately
+// conservative: concurrent fills cannot each claim the same currently free
+// space.
+func (s *Store) ReserveCapacity(expectedBytes, minimumFreeBytes int64, minimumFreePercent float64) (func(), error) {
+	if expectedBytes < 0 || minimumFreeBytes < 0 || minimumFreePercent < 0 || minimumFreePercent >= 100 {
+		return nil, errors.New("invalid package-store capacity request")
+	}
+
+	s.capacityMu.Lock()
+	availableBytes, totalBytes, err := s.space()
+	if err != nil {
+		s.capacityMu.Unlock()
+		return nil, fmt.Errorf("inspect package-store capacity: %w", err)
+	}
+	percentReserve := int64(float64(totalBytes) * minimumFreePercent / 100)
+	if percentReserve > minimumFreeBytes {
+		minimumFreeBytes = percentReserve
+	}
+	remainingBytes := availableBytes - minimumFreeBytes
+	if remainingBytes < 0 || s.reservedBytes > remainingBytes || expectedBytes > remainingBytes-s.reservedBytes {
+		s.capacityMu.Unlock()
+		return nil, fmt.Errorf(
+			"%w: available=%d reserved=%d required=%d minimum_free=%d",
+			ErrInsufficientSpace,
+			availableBytes,
+			s.reservedBytes,
+			expectedBytes,
+			minimumFreeBytes,
+		)
+	}
+	s.reservedBytes += expectedBytes
+	s.capacityMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.capacityMu.Lock()
+			s.reservedBytes -= expectedBytes
+			s.capacityMu.Unlock()
+		})
+	}, nil
+}
+
+// CleanupStaleTemporary removes only old regular .part files. It is intended
+// for startup recovery, before this process can have active temporary files.
+// Symlinks and unrelated entries are never followed or removed.
+func (s *Store) CleanupStaleTemporary(maxAge time.Duration, now time.Time) (int, error) {
+	if maxAge <= 0 {
+		return 0, errors.New("temporary-file maximum age must be greater than zero")
+	}
+	entries, err := os.ReadDir(s.tempRoot)
+	if err != nil {
+		return 0, fmt.Errorf("read temporary package directory: %w", err)
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".part") {
+			continue
+		}
+		path := filepath.Join(s.tempRoot, entry.Name())
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return removed, fmt.Errorf("inspect temporary package %q: %w", entry.Name(), err)
+		}
+		if !info.Mode().IsRegular() || now.Sub(info.ModTime()) < maxAge {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return removed, fmt.Errorf("remove stale temporary package %q: %w", entry.Name(), err)
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 func (s *Store) finalPath(filename string) (string, error) {
@@ -231,4 +328,20 @@ func syncDirectory(path string) error {
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+
+func filesystemSpace(path string) (int64, int64, error) {
+	var statistics syscall.Statfs_t
+	if err := syscall.Statfs(path, &statistics); err != nil {
+		return 0, 0, err
+	}
+	if statistics.Bsize <= 0 {
+		return 0, 0, errors.New("filesystem returned an invalid block size")
+	}
+	availableBytes := int64(statistics.Bavail) * statistics.Bsize
+	totalBytes := int64(statistics.Blocks) * statistics.Bsize
+	if availableBytes < 0 || totalBytes <= 0 {
+		return 0, 0, errors.New("filesystem capacity exceeds the supported range")
+	}
+	return availableBytes, totalBytes, nil
 }

@@ -91,6 +91,38 @@ func TestProviderRefreshesAfterInvalidation(t *testing.T) {
 	}
 }
 
+func TestProviderAcceptsObservedShortLivedJamfResponseAndReusesToken(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"access_token":"sanitized-test-token",
+			"scope":"synthetic-scope",
+			"token_type":"Bearer",
+			"expires_in":59
+		}`))
+	}))
+	defer server.Close()
+
+	// The configured 60-second margin is longer than the observed 59-second
+	// lifetime. The provider must adapt the margin instead of refreshing on
+	// every API call.
+	provider := NewProvider(server.Client(), server.URL, "client", "secret", 60*time.Second)
+	for range 2 {
+		token, err := provider.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token() error = %v", err)
+		}
+		if token != "sanitized-test-token" {
+			t.Fatalf("Token() = %q, want sanitized-test-token", token)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("token endpoint requests = %d, want 1", got)
+	}
+}
+
 func TestProviderMapsFailureStatusesWithoutReturningResponseBodies(t *testing.T) {
 	tests := []struct {
 		name      string

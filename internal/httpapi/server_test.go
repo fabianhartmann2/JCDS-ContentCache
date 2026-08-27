@@ -70,7 +70,7 @@ func newTestServer(t *testing.T, objectURL string, expectedContent []byte) (*Ser
 	policy := download.NewPolicy([]string{"127.0.0.1"}, true)
 	downloader := download.NewClient(http.DefaultClient, policy, 1024*1024)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(logger, packageStore, metadata, resolver, downloader, 10*time.Second, 1024*1024)
+	server := New(logger, packageStore, metadata, resolver, downloader, 10*time.Second, 1024*1024, 0, 0)
 	return server, filepath.Join(root, "packages", "ExampleFile.pkg"), resolver, metadata
 }
 
@@ -461,6 +461,39 @@ func TestHeadMissDoesNotStartUpstreamFill(t *testing.T) {
 	}
 }
 
+func TestInvalidPackagePathsAreRejectedBeforeUpstreamCalls(t *testing.T) {
+	tests := []string{
+		"/packages/../Secret.pkg",
+		"/packages/%2e%2e%2fSecret.pkg",
+		"/packages/Folder%2FExample.pkg",
+		"/packages/Folder%5cExample.pkg",
+		"/packages/ExampleFile.PKG",
+		"/packages/.Hidden.pkg",
+		"/packages/ExampleFile.pkg?url=https://invalid.example/object",
+		"/packages/https:%2F%2Finvalid.example%2FExample.pkg",
+	}
+
+	for _, requestTarget := range tests {
+		t.Run(requestTarget, func(t *testing.T) {
+			api, _, resolver, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
+			request := httptest.NewRequest(http.MethodGet, requestTarget, nil)
+			response := httptest.NewRecorder()
+
+			api.handlePackage(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", response.Code)
+			}
+			if got := resolver.calls.Load(); got != 0 {
+				t.Fatalf("resolver calls = %d, want 0", got)
+			}
+			if got := metadata.calls.Load(); got != 0 {
+				t.Fatalf("metadata calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestDependencyErrorsHaveControlledStatusesAndDiagnosticCategories(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -519,6 +552,13 @@ func TestDependencyErrorsHaveControlledStatusesAndDiagnosticCategories(t *testin
 			wantStatus:   http.StatusBadGateway,
 			wantBody:     "package retrieval failed\n",
 			wantCategory: "download_url_rejected",
+		},
+		{
+			name:         "package store capacity exhausted",
+			err:          store.ErrInsufficientSpace,
+			wantStatus:   http.StatusInsufficientStorage,
+			wantBody:     "package store has insufficient free space\n",
+			wantCategory: "store_capacity_exhausted",
 		},
 	}
 

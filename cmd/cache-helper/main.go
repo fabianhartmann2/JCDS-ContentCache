@@ -36,10 +36,18 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	removedTemporaryFiles, err := packageStore.CleanupStaleTemporary(cfg.TempFileMaxAge, time.Now())
+	if err != nil {
+		return err
+	}
+	if removedTemporaryFiles > 0 {
+		logger.Info("removed stale temporary packages", "count", removedTemporaryFiles)
+	}
 
 	serviceClient := &http.Client{
-		Transport: newTransport(),
-		Timeout:   30 * time.Second,
+		Transport:     newTransport(),
+		Timeout:       30 * time.Second,
+		CheckRedirect: rejectServiceRedirect,
 	}
 	tokenProvider := auth.NewProvider(
 		serviceClient,
@@ -72,6 +80,8 @@ func run(logger *slog.Logger) error {
 		downloadClient,
 		cfg.FillTimeout,
 		cfg.MaxPackageBytes,
+		cfg.MinFreeBytes,
+		cfg.MinFreePercent,
 	)
 
 	server := &http.Server{
@@ -107,6 +117,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+func rejectServiceRedirect(*http.Request, []*http.Request) error {
+	// OAuth and Jamf API endpoints are configured explicitly. Following a 307
+	// or 308 could forward credentials or bearer tokens to another origin.
+	return http.ErrUseLastResponse
 }
 
 func newTransport() *http.Transport {
