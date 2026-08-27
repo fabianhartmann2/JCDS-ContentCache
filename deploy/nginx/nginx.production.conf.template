@@ -88,17 +88,37 @@ http {
         keepalive 32;
     }
 
+    # Container-only health listener. It is not published by Compose and avoids
+    # bypassing TLS or the managed-client allowlist on the external listener.
+    server {
+        listen 127.0.0.1:8080;
+        server_name _;
+
+        location = /health/live {
+            proxy_pass http://cache_helper;
+        }
+
+        location = /health/ready {
+            proxy_pass http://cache_helper;
+        }
+
+        location / {
+            return 404;
+        }
+    }
+
     server {
         listen 8443 ssl;
-        server_name packages.example.ch;
+        server_name jcds-cache.appfruit.ch;
 
-        ssl_certificate /etc/nginx/tls/tls.crt;
-        ssl_certificate_key /etc/nginx/tls/tls.key;
+        ssl_certificate /etc/letsencrypt/live/jcds-cache.appfruit.ch/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/jcds-cache.appfruit.ch/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_cache shared:TLS:10m;
+        ssl_session_timeout 1d;
+        ssl_session_tickets off;
 
-        # Replace these example ranges with the approved managed-client networks.
-        allow 10.0.0.0/8;
-        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
         deny all;
 
         location = /health/live {
@@ -119,6 +139,7 @@ http {
             try_files $uri @fetch_from_jamf;
             add_header X-Package-Source LOCAL always;
             add_header X-Request-ID $request_id always;
+            add_header X-Content-Type-Options nosniff always;
         }
 
         location @fetch_from_jamf {
@@ -136,6 +157,7 @@ http {
             proxy_read_timeout 2h;
             proxy_send_timeout 2h;
             add_header X-Request-ID $request_id always;
+            add_header X-Content-Type-Options nosniff always;
         }
     }
 }

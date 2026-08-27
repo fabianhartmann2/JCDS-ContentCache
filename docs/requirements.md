@@ -4,7 +4,7 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.5
+**Version:** 0.6
 
 **Date:** 27 August 2026
 
@@ -18,7 +18,7 @@
 
 ## 1. Executive summary
 
-The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through a company-controlled HTTPS endpoint such as https://packages.example.ch:8443/packages/ExampleFile.pkg. The canonical request path maps directly to a human-readable local path such as /srv/jamf-store/packages/ExampleFile.pkg. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, reads authoritative size and SHA3-512 metadata, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written and hashed in hidden temporary storage; only a transfer matching the Jamf catalog length and SHA3-512 digest is atomically published under the final original filename.
+The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through the company-controlled endpoint `https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg`. The canonical request path maps directly to a human-readable local path such as `/srv/jamf-store/packages/ExampleFile.pkg`. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, reads authoritative size and SHA3-512 metadata, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written and hashed in hidden temporary storage; only a transfer matching the Jamf catalog length and SHA3-512 digest is atomically published under the final original filename.
 
 The service is deliberately split into two components. NGINX owns TLS termination, normalized filesystem lookup, static-file delivery, miss routing, downstream streaming and request controls. A small purpose-built helper owns OAuth client-credentials authentication, Jamf API interaction, JSON parsing, signed-URL validation, upstream streaming, temporary-file management, atomic publication and per-package single-flight coordination. This separation keeps lifecycle-sensitive Jamf API logic out of the web server configuration while preserving a simple local file layout.
 
@@ -129,6 +129,13 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
 | Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
 | Cache storage          | Provision 500 GB–1 TB of usable cache storage and retain at least 20 percent operational headroom.                                                                          | Resolved range      |
+| Host baseline          | Use Ubuntu Server 26.04 LTS on amd64/x86_64 for the first host.                                                                                                             | Resolved            |
+| Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
+| Client access          | Permit source CIDR `192.168.0.0/16`; no additional client authentication is required for v1.                                                                               | Resolved            |
+| Host storage path      | Mount the dedicated local package-store filesystem at `/srv/jamf-store`; do not use `/usr` for served data.                                                                | Resolved            |
+| Secret delivery        | Pass the Jamf client secret through a root-owned mode-`0600` host environment file outside Git.                                                                             | Resolved            |
+| DNS and certificate    | Use manual DNS records and manual DNS validation for initial certificate issuance; expiry monitoring is mandatory and unattended renewal remains a production gate.          | Pilot decision      |
+| Outbound network       | Connect directly over validated HTTPS without an outbound proxy or TLS inspection.                                                                                          | Resolved            |
 
 > **Normative language:** Must indicates a mandatory production requirement. Should indicates a recommended requirement that may only be waived through a documented design decision. May identifies an optional capability.
 
@@ -167,7 +174,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 - Clients can reach only the NGINX HTTPS listener. The helper must not be exposed outside the container network or host loopback interface.
 
-- NGINX does not receive the Jamf client secret. The helper receives secrets through the approved secret mechanism and retains access tokens in memory only.
+- NGINX does not receive the Jamf client secret. Docker injects it only into the helper from the root-owned host environment file, and the helper retains access tokens in memory only.
 
 - The helper may connect only to the configured Jamf tenant and approved JCDS/CDN destinations over validated TLS.
 
@@ -391,7 +398,7 @@ The Jamf API client must have only the permission required to read JCDS file dow
 
 ### NFR-007 Secret protection
 
-Client secrets, access tokens and signed URLs must not be embedded in images, source control, client-visible headers, metrics or standard logs. Secrets must be mounted or retrieved through the enterprise-approved secret mechanism and rotation must not require rebuilding images.
+Client secrets, access tokens and signed URLs must not be embedded in images, source control, client-visible headers, metrics or standard logs. For v1, Docker must inject the Jamf client secret from a root-owned mode-`0600` host environment file outside the Git checkout. Rotation must require only an environment-file update and controlled helper replacement, not an image rebuild. Root and Docker administrators can inspect container environment values and are therefore trusted privileged operators.
 
 > **Priority: Must. Acceptance:** Repository/image scans and log review find no secret material; rotation succeeds through the runbook.
 
@@ -558,13 +565,13 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | nginx                           | TLS listener on 8443, try_files lookup, static delivery, internal miss routing and downstream streaming                             | Client network + internal helper              |
 | jamf-download-helper            | Single-flight coordination, OAuth, catalog/resolver adapters, URL policy, hashing, temporary files and atomic publication           | Internal container network only               |
 | Persistent package-store volume | Human-readable final packages and hidden temporary files                                                                            | Writable only by the package-publication path |
-| Secrets/certificates            | Jamf client secret, TLS key and trust configuration                                                                                 | Read-only mounts or approved secret provider  |
+| Secrets/certificates            | Jamf client secret in a root-owned host environment file; TLS key and trust configuration in the host certificate tree             | Helper environment only / NGINX read-only mount |
 
 - Images must use approved registries, pinned versions or digests and a documented patch cadence.
 
 - The helper should be a small statically compiled service, such as Go, with bounded streaming buffers and no shell execution.
 
-- Containers should run as non-root on port 8443, drop unused capabilities, use no-new-privileges and have read-only root filesystems.
+- The helper must run as a non-root UID. NGINX may retain its standard root master solely to read the host certificate and switch to unprivileged workers; it must drop all unrelated capabilities. Both containers must use no-new-privileges and read-only root filesystems with only explicit writable paths.
 
 - Only the package-store staging/finalization path and explicitly required runtime directories may be writable; static-serving workers should have the minimum required write access.
 
@@ -681,11 +688,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Use this deprecated endpoint until Jamf introduces a replacement. Keep it behind a configurable adapter, monitor Jamf deprecation notices and capture remaining non-404 error responses for resilience tests.
 - **Required follow-up:** Migration trigger and runbook before production approval
 
-#### OQ-02 — Client access control (OPEN)
+#### OQ-02 — Client access control (RESOLVED)
 
-- **Decision required:** Are clients authorized by network location, mutual TLS, another identity mechanism, or a combination?
-- **Recommended default:** Use server-authenticated TLS plus enterprise network allowlisting for the first internal deployment; add mTLS if clients can reach the service from untrusted networks.
-- **Required by:** Security design
+- **Decision:** Use server-authenticated TLS and restrict v1 access to source CIDR `192.168.0.0/16`; no additional client authentication is required.
+- **Required follow-up:** Enforce the same CIDR at NGINX and the approved Docker-aware host/perimeter firewall, then validate from one allowed and one denied network.
 
 #### OQ-03 — Workload and capacity (IN REVIEW)
 
@@ -720,17 +726,15 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Start with 180 days minimum inactivity before cleanup and validate it against inventory/reuse data. No freshness expiry is required for immutable names.
 - **Required by:** Detailed design
 
-#### OQ-08 — TLS ownership (OPEN)
+#### OQ-08 — TLS ownership (RESOLVED FOR PILOT)
 
-- **Decision required:** Which DNS name, certificate authority and renewal mechanism will supply the client-facing certificate?
-- **Recommended default:** Use an enterprise DNS name and automatically renewed enterprise PKI certificate; avoid manual certificate replacement.
-- **Required by:** Infrastructure build
+- **Decision:** Use `jcds-cache.appfruit.ch`; create DNS records manually and obtain the initial publicly trusted certificate through manual DNS validation.
+- **Required follow-up:** Assign a certificate owner, alert at least 30 days before expiry and introduce unattended renewal before production approval. Manual renewal is acceptable only for the controlled pilot.
 
-#### OQ-09 — Secrets platform (OPEN)
+#### OQ-09 — Secret delivery (RESOLVED)
 
-- **Decision required:** Where will the Jamf client secret be stored and how will rotation be delivered to the helper?
-- **Recommended default:** Use the existing enterprise secret store or container-secret mechanism with read-only file delivery and restart/reload after rotation.
-- **Required by:** Security and operations design
+- **Decision:** Store the secret as an environment assignment in a root-owned mode-`0600` host file outside Git and let Docker inject it only into the helper container.
+- **Required follow-up:** Exercise rotation through file replacement and helper recreation; restrict Docker administration because privileged operators can inspect container environment values.
 
 #### OQ-10 — Monitoring platform (OPEN)
 
@@ -765,10 +769,14 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-03   | Initial deployment     | NGINX and helper containers on one managed Linux host.                                                                                                          |
 | D-04   | Jamf API lifecycle     | Use the deprecated JCDS resolver and catalog endpoints until Jamf introduces replacements; keep both behind replaceable adapters.                                |
 | D-05   | Publication integrity  | Require catalog length and SHA3-512 verification before atomic publication; do not treat MD5 as the security boundary.                                           |
-| D-06   | Catalog response       | Treat the observed JCDS metadata response as one complete top-level JSON array; fail closed on a future detected partial envelope.                                |
 | D-07   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
 | D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
 | D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
+| D-10   | Host profile           | Ubuntu Server 26.04 LTS on amd64/x86_64 with a dedicated local filesystem mounted at `/srv/jamf-store`.                                                          |
+| D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` and permit `192.168.0.0/16`; no additional v1 client authentication.                                                       |
+| D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |
+| D-13   | Secret delivery        | Inject the Jamf client secret into the helper from a root-owned mode-`0600` host environment file outside Git.                                                   |
+| D-14   | Outbound network       | Use direct validated HTTPS without an outbound proxy or TLS inspection.                                                                                          |
 
 ## 17. Delivery plan
 
@@ -789,11 +797,11 @@ Resolve the remaining questions in this order because each answer constrains the
 
 2.  Capture actual client GET/HEAD/Range behaviour and workload scale (OQ-03 and OQ-05).
 
-3.  Confirm legitimate JCDS/CDN destinations and downstream access control (OQ-02 and OQ-06).
+3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 network controls (OQ-06).
 
 4.  Set the SLO, package-store capacity, cleanup policy and Linux host/storage sizing (OQ-04 and OQ-07).
 
-5.  Assign DNS/TLS, secrets, monitoring and operational ownership (OQ-08 to OQ-10).
+5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 
 6.  Retain regression coverage for the resolved path contract (OQ-11) and verify the resolved integrity policy (OQ-12) in production-like tests.
 

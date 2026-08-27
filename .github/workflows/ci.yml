@@ -51,5 +51,10 @@ jobs:
             jcds-contract-capture:ci \
             /bin/sh -c 'test "${SSL_CERT_FILE}" = /tmp/capture-ca-bundle.pem && grep -q -- synthetic-ca-marker "${SSL_CERT_FILE}"'
           rm -f -- "${capture_ca}"
+      - name: Validate production deployment configuration
+        run: |
+          bash -n scripts/check-certificate-expiry.sh
+          bash -n tests/integration/production_config_smoke.sh
+          tests/integration/production_config_smoke.sh
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

@@ -1,0 +1,101 @@
+name: jcds-content-cache
+
+services:
+  cache-helper:
+    image: jcds-content-cache:${CACHE_IMAGE_TAG:-production}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: cache-helper
+    env_file:
+      - ${CACHE_HELPER_ENV_FILE:-/etc/jcds-content-cache/cache-helper.env}
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
+    stop_grace_period: 2m
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ${PACKAGE_STORE_PATH:-/srv/jamf-store}
+        target: /srv/jamf-store
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    depends_on:
+      cache-helper:
+        condition: service_healthy
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    pids_limit: 256
+    mem_limit: 512m
+    restart: unless-stopped
+    ports:
+      - "${CACHE_LISTEN_IP:-0.0.0.0}:8443:8443/tcp"
+    volumes:
+      - type: bind
+        source: ../nginx/nginx.production.conf.template
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: ${PACKAGE_STORE_PATH:-/srv/jamf-store}
+        target: /srv/jamf-store
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LETSENCRYPT_ROOT:-/etc/letsencrypt}
+        target: /etc/letsencrypt
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge

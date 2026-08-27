@@ -1,7 +1,7 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
 **Status:** Active working plan  
-**Version:** 0.5  
+**Version:** 0.6  
 **Date:** 27 August 2026  
 **Owner:** Mac Workplace  
 **Target:** Production service on one managed Linux container host
@@ -28,6 +28,13 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
 | Initial client population | 500–2,000 managed Macs |
 | Initial usable cache storage | 500 GB–1 TB, retaining 20% operational headroom |
+| Host baseline | Ubuntu Server 26.04 LTS on amd64/x86_64 |
+| Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
+| Client access | Server-authenticated TLS and source CIDR `192.168.0.0/16`; no additional v1 client authentication |
+| Package-store mount | Dedicated local filesystem at `/srv/jamf-store` |
+| DNS and certificate | Manual DNS records and an initial certificate obtained through manual DNS validation; unattended renewal remains a production gate |
+| Secret delivery | Root-owned host environment file, mode `0600`, passed to the helper by Docker Compose |
+| Outbound network | Direct HTTPS; no proxy or TLS inspection |
 | Local storage | URL-derived, filename-preserving files below `/srv/jamf-store/packages/` |
 | Local hit | NGINX serves the completed file directly |
 | Store miss | NGINX routes internally to the helper |
@@ -120,18 +127,18 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 - [x] Enforce method, path length, character and extension restrictions for the confirmed flat lowercase `.pkg` namespace.
 - [x] Reject traversal, encoded traversal, ambiguous encoding, absolute URLs, query-based destinations and symlink escapes.
-- [ ] Apply inbound network controls and the selected client-authentication policy.
-- [ ] Apply outbound DNS, host, port and redirect restrictions.
-- [ ] Deliver the Jamf client secret through the selected secret platform.
-- [ ] Ensure secrets, tokens and signed URLs are redacted from logs, metrics, traces and error responses.
+- [x] Add production-candidate NGINX controls for TLS and the confirmed `192.168.0.0/16` client allowlist; host/perimeter enforcement remains a deployment task.
+- [x] Apply exact-host, HTTPS-only, DNS-address and per-redirect restrictions in the helper; the final runtime hostname inventory remains open.
+- [x] Define root-owned host environment-file delivery for the Jamf secret without placing credentials in images, Compose YAML or Git.
+- [x] Ensure secrets, tokens and signed URLs are redacted from normal logs and error responses, with automated disclosure-focused tests.
 - [x] Sanitize dependency response bodies and complete request URLs before errors reach client responses or normal logs.
 - [x] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
-- [ ] Add bounded connect, header, read, idle and total-operation timeouts.
+- [x] Add bounded connect, TLS-handshake, response-header, idle, fill and shutdown timeouts.
 - [ ] Add bounded retries with backoff only for safe transient operations.
 - [x] Add maximum object size and minimum-free-space protections.
 - [x] Add startup cleanup for stale regular `.part` files after the configured age threshold.
 - [x] Require Jamf catalog length and SHA3-512 validation before publishing a downloaded package; retain MD5 for interoperability only.
-- [ ] Add non-root containers, read-only root filesystems where practical and minimal Linux capabilities.
+- [x] Add non-root helper/mock images plus production read-only root filesystems, capability dropping, PID/memory bounds and unprivileged internal networking.
 - [ ] Add dependency, image and source scanning to CI.
 
 **Exit criteria**
@@ -145,8 +152,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 **Goal:** Deploy a controlled production candidate using real enterprise services.
 
 - [ ] Provision the Linux host, persistent volume, DNS, firewall and egress rules.
-- [ ] Issue and automatically renew the service certificate.
-- [ ] Provision the least-privilege Jamf API client in the enterprise secret store.
+- [x] Add a host-specific Compose definition, NGINX TLS configuration, environment templates, certificate check and deployment/rollback runbook.
+- [ ] Issue the initial certificate through manual DNS validation and establish an automated renewal method before production approval.
+- [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
 - [ ] Configure capacity thresholds, retention and administrative cleanup procedures.
 - [ ] Connect logs, metrics and alerts to the selected monitoring platform.
 - [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
@@ -197,10 +205,10 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
 | OQ-07 | Store capacity and retention | High | IN REVIEW | Provision 500 GB–1 TB usable cache storage and retain 20% headroom; retention/eviction policy remains open | Inventory growth, reuse interval, and operational cleanup policy |
-| OQ-02 | Client access control | High | OPEN | Server TLS plus enterprise-network allowlist; add mTLS if network trust is insufficient | Client network paths, proxy/VPN behavior and security policy |
+| OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS plus source CIDR `192.168.0.0/16`; no additional v1 authentication | Validate allowed and denied paths at the host/perimeter firewall and NGINX |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
-| OQ-08 | TLS certificate ownership | Medium | OPEN | Enterprise DNS and automatically renewed enterprise PKI certificate | DNS owner, certificate platform and renewal responsibility |
-| OQ-09 | Secret delivery platform | Medium | OPEN | Read-only delivery from the enterprise secret store; no secret in images or Compose files | Available platform, rotation method and runtime integration |
+| OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
+| OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
 | OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
 
 ## 6. Definition of ready for coding
@@ -215,7 +223,7 @@ Repository scaffolding and mock-driven implementation can begin immediately. Rea
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
 
-Capacity, availability, TLS, secrets and monitoring questions must be resolved before Phase 3.
+Availability, retention and monitoring ownership remain open before production approval. TLS and secret-delivery decisions are fixed for the controlled pilot, while unattended certificate renewal remains an explicit gate.
 
 ## 7. Initial repository layout
 
@@ -273,11 +281,14 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
 | 2026-08-27 | Milestone M1 | Added automated deployed-path evidence for MISS-to-LOCAL delivery, local ranges, client-abort continuation, truncated-transfer cleanup and persistence across serving-container restarts | In review |
 | 2026-08-27 | Phase 2 resilience | Added typed OAuth/Jamf/object failure categories, URL/body redaction tests, controlled downstream mappings and local-hit availability during an upstream outage | In review |
+| 2026-08-27 | Host profile | Selected Ubuntu Server 26.04 LTS amd64, `jcds-cache.appfruit.ch:8443`, `/srv/jamf-store`, and direct outbound HTTPS | Resolved |
+| 2026-08-27 | Access and secrets | Selected `192.168.0.0/16` CIDR-only client access and a root-owned Docker environment file for the Jamf secret | Resolved |
+| 2026-08-27 | Production candidate | Added hardened Compose/NGINX configuration, manual-DNS certificate procedure, expiry validation, monitoring, update and rollback guidance | In review |
 
 ## 10. Immediate next actions
 
-1. Capture sanitized unauthorized, throttled and server-error Jamf response shapes to validate the implemented status-driven, body-agnostic mappings against the real tenant.
-2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range traffic to resolve OQ-05.
-3. Confirm the production JCDS hostname inventory and whether real resolver URLs redirect, then resolve OQ-06.
-4. Measure package inventory, largest object and simultaneous fill demand to finish OQ-03 and select the retention policy for OQ-07.
-5. Enable default-branch protection and require the passing CI workflow when repository settings permit.
+1. Provision the Ubuntu host and dedicated `/srv/jamf-store` filesystem, create the manual DNS records, and issue the initial certificate using the production runbook.
+2. Install the dedicated Jamf API client and exact production JCDS hostname in the root-owned helper environment file, then perform the controlled real-tenant smoke test.
+3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from the privacy-safe NGINX records to resolve OQ-05.
+4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
+5. Select certificate-renewal and monitoring owners, define the retention policy/SLO, and finish the production acceptance gates before broad rollout.

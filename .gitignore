@@ -6,3 +6,5 @@
 /tmp/
 *.part
 sanitized-contract-report*.json
+deploy/production/*.env
+!deploy/production/*.env.example

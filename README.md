@@ -3,13 +3,13 @@
 `JCDS-ContentCache` is a filesystem-backed pull-through package store for Jamf Cloud Distribution Service (JCDS). Managed clients use a stable internal URL such as:
 
 ```text
-https://packages.example.ch:8443/packages/ExampleFile.pkg
+https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
 ```
 
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
-> This repository is an early mock-driven implementation. It must not be connected to production Jamf credentials until the external API contract, destination allowlist, client range behavior, and security controls in the execution plan are validated.
+> This repository includes a production-candidate deployment, but it is not yet a production-approved service. Use real Jamf credentials only on the controlled host described in the runbook, with an exact JCDS hostname allowlist. A representative managed-Mac workflow, certificate renewal, retention policy, monitoring ownership, and the remaining production acceptance gates still require validation.
 
 ## Current milestone
 
@@ -52,7 +52,7 @@ Expected response headers:
 - First request: `X-Package-Source: JCDS`
 - Subsequent request: `X-Package-Source: LOCAL`
 
-The local stack intentionally uses plain HTTP on host port `8443`. Production deployment must use the TLS template and enterprise-managed certificates.
+The local stack intentionally uses plain HTTP on host port `8443`. The production-candidate stack uses TLS and the host-specific certificate paths in the production NGINX template.
 
 Stop and remove the development stack:
 
@@ -79,6 +79,14 @@ tests/integration/compose_smoke.sh
 ```
 
 It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms that the completed package remains locally available after restart and during an upstream outage.
+
+## Production candidate
+
+The first host profile is Ubuntu Server 26.04 LTS on amd64, serving `jcds-cache.appfruit.ch:8443` to `192.168.0.0/16`. Completed packages and hidden temporary files live on one dedicated filesystem mounted at `/srv/jamf-store`. The production Compose definition runs the helper as UID/GID `65532`, gives NGINX read-only access to package storage, uses read-only container root filesystems, drops unnecessary capabilities, and does not publish the helper port.
+
+The Jamf client secret is supplied through a root-owned mode-`0600` environment file outside the repository. Manual DNS is used for initial certificate issuance, so unattended renewal is not available yet; certificate-expiry monitoring and a named renewal owner are mandatory for the pilot.
+
+Follow [Production-candidate deployment](docs/production-deployment.md) for host preparation, DNS, certificate issuance, configuration, validation, rollout, monitoring, update, and rollback procedures. Do not copy a completed environment file, a real Jamf tenant URL, a signed download URL, or the exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
@@ -137,6 +145,7 @@ internal/store/         Temporary files, publication and single-flight locks
 deploy/compose/         Local development stack
 deploy/contract-capture/ Hardened one-shot live validation image
 deploy/nginx/           Development and production NGINX templates
+deploy/production/      Hardened single-host production-candidate stack
 docs/                   Requirements, execution plan and contract evidence
 ```
 
@@ -146,6 +155,7 @@ docs/                   Requirements, execution plan and contract evidence
 - [Project execution plan](docs/execution-plan.md)
 - [External-contract evidence template](docs/external-contracts.md)
 - [Client request monitoring](docs/client-request-monitoring.md)
+- [Production-candidate deployment](docs/production-deployment.md)
 
 ## Security notes
 

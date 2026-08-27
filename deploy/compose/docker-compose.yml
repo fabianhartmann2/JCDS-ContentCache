@@ -19,7 +19,7 @@ services:
   mock-upstream:
     build:
       context: ../..
-    entrypoint: ["/usr/local/bin/mock-upstream"]
+      target: mock-upstream
     environment:
       MOCK_LISTEN_ADDR: :8081
       MOCK_PUBLIC_BASE_URL: http://mock-upstream:8081
@@ -37,6 +37,7 @@ services:
   cache-helper:
     build:
       context: ../..
+      target: cache-helper
     depends_on:
       store-init:
         condition: service_completed_successfully
@@ -68,7 +69,7 @@ services:
       - /tmp
 
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.4-alpine
     depends_on:
       cache-helper:
         condition: service_started
