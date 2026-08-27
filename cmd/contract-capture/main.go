@@ -41,16 +41,16 @@ type oauthReport struct {
 }
 
 type catalogReport struct {
-	TopLevelShape       string `json:"top_level_shape"`
-	FileCount           int    `json:"file_count"`
-	V1PackageCount      int    `json:"v1_package_count"`
-	V1TotalBytes        int64  `json:"v1_total_bytes"`
-	V1LargestBytes      int64  `json:"v1_largest_bytes"`
-	ExactFilenameMatch  bool   `json:"exact_filename_match"`
-	LengthPresent       bool   `json:"length_present"`
-	MD5HexCharacters    int    `json:"md5_hex_characters"`
-	RegionPresent       bool   `json:"region_present"`
-	SHA3HexCharacters   int    `json:"sha3_hex_characters"`
+	TopLevelShape      string `json:"top_level_shape"`
+	FileCount          int    `json:"file_count"`
+	V1PackageCount     int    `json:"v1_package_count"`
+	V1TotalBytes       int64  `json:"v1_total_bytes"`
+	V1LargestBytes     int64  `json:"v1_largest_bytes"`
+	ExactFilenameMatch bool   `json:"exact_filename_match"`
+	LengthPresent      bool   `json:"length_present"`
+	MD5HexCharacters   int    `json:"md5_hex_characters"`
+	RegionPresent      bool   `json:"region_present"`
+	SHA3HexCharacters  int    `json:"sha3_hex_characters"`
 }
 
 type resolverReport struct {
@@ -137,8 +137,8 @@ func run(output io.Writer) error {
 		return errors.New("CAPTURE_PACKAGE_NAME is not a valid flat .pkg filename")
 	}
 	for name, rawURL := range map[string]string{
-		"JAMF_TOKEN_URL":            tokenURL,
-		"JAMF_CATALOG_URL":          catalogURL,
+		"JAMF_TOKEN_URL":             tokenURL,
+		"JAMF_CATALOG_URL":           catalogURL,
 		"JAMF_RESOLVER_URL_TEMPLATE": strings.Replace(resolverTemplate, "{filename}", "Synthetic.pkg", 1),
 	} {
 		if err := validateHTTPSServiceURL(name, rawURL); err != nil {
