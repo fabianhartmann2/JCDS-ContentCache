@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.23-alpine AS build
+FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
@@ -17,4 +17,3 @@ COPY --from=build /out/mock-upstream /usr/local/bin/mock-upstream
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/cache-helper"]
-

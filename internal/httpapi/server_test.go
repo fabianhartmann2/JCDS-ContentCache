@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha3"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/download"
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/jamf"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
 )
 
@@ -27,7 +30,17 @@ func (r *staticResolver) Resolve(context.Context, string) (string, error) {
 	return r.url, nil
 }
 
-func newTestServer(t *testing.T, objectURL string) (*Server, string, *staticResolver) {
+type staticMetadata struct {
+	metadata jamf.FileMetadata
+	calls    atomic.Int64
+}
+
+func (m *staticMetadata) Lookup(context.Context, string) (jamf.FileMetadata, error) {
+	m.calls.Add(1)
+	return m.metadata, nil
+}
+
+func newTestServer(t *testing.T, objectURL string, expectedContent []byte) (*Server, string, *staticResolver, *staticMetadata) {
 	t.Helper()
 	root := t.TempDir()
 	packageStore, err := store.New(filepath.Join(root, "packages"), filepath.Join(root, ".temporary"))
@@ -35,11 +48,17 @@ func newTestServer(t *testing.T, objectURL string) (*Server, string, *staticReso
 		t.Fatalf("store.New() error = %v", err)
 	}
 	resolver := &staticResolver{url: objectURL}
+	digest := sha3.Sum512(expectedContent)
+	metadata := &staticMetadata{metadata: jamf.FileMetadata{
+		FileName: "ExampleFile.pkg",
+		Length:   int64(len(expectedContent)),
+		SHA3:     hex.EncodeToString(digest[:]),
+	}}
 	policy := download.NewPolicy([]string{"127.0.0.1"}, true)
 	downloader := download.NewClient(http.DefaultClient, policy, 1024*1024)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(logger, packageStore, resolver, downloader, 10*time.Second, 1024*1024)
-	return server, filepath.Join(root, "packages", "ExampleFile.pkg"), resolver
+	server := New(logger, packageStore, metadata, resolver, downloader, 10*time.Second, 1024*1024)
+	return server, filepath.Join(root, "packages", "ExampleFile.pkg"), resolver, metadata
 }
 
 func TestMissStreamsThenPublishesAndBecomesLocalHit(t *testing.T) {
@@ -57,7 +76,8 @@ func TestMissStreamsThenPublishesAndBecomesLocalHit(t *testing.T) {
 	}))
 	defer objectServer.Close()
 
-	api, finalPath, resolver := newTestServer(t, objectServer.URL)
+	expectedContent := append(append([]byte{}, firstChunk...), secondChunk...)
+	api, finalPath, resolver, metadata := newTestServer(t, objectServer.URL, expectedContent)
 	server := httptest.NewServer(api.Handler())
 	defer server.Close()
 
@@ -101,6 +121,9 @@ func TestMissStreamsThenPublishesAndBecomesLocalHit(t *testing.T) {
 	if got := resolver.calls.Load(); got != 1 {
 		t.Fatalf("resolver calls = %d, want 1", got)
 	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
 }
 
 func waitForFile(t *testing.T, path string) {
@@ -129,7 +152,7 @@ func TestConcurrentMissesCauseOneUpstreamTransfer(t *testing.T) {
 	}))
 	defer objectServer.Close()
 
-	api, _, resolver := newTestServer(t, objectServer.URL)
+	api, _, resolver, metadata := newTestServer(t, objectServer.URL, content)
 	server := httptest.NewServer(api.Handler())
 	defer server.Close()
 
@@ -165,10 +188,13 @@ func TestConcurrentMissesCauseOneUpstreamTransfer(t *testing.T) {
 	if got := resolver.calls.Load(); got != 1 {
 		t.Fatalf("resolver calls = %d, want 1", got)
 	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
 }
 
 func TestInvalidPackagePathDoesNotCallResolver(t *testing.T) {
-	api, _, resolver := newTestServer(t, "http://127.0.0.1/unused")
+	api, _, resolver, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
 	request := httptest.NewRequest(http.MethodGet, "/packages/..%2Fsecret.pkg", nil)
 	response := httptest.NewRecorder()
 
@@ -179,5 +205,33 @@ func TestInvalidPackagePathDoesNotCallResolver(t *testing.T) {
 	}
 	if got := resolver.calls.Load(); got != 0 {
 		t.Fatalf("resolver calls = %d, want 0", got)
+	}
+	if got := metadata.calls.Load(); got != 0 {
+		t.Fatalf("metadata calls = %d, want 0", got)
+	}
+}
+
+func TestChecksumMismatchIsNotPublished(t *testing.T) {
+	content := []byte("package bytes with the wrong catalog digest")
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "43")
+		_, _ = w.Write(content)
+	}))
+	defer objectServer.Close()
+
+	api, finalPath, _, metadata := newTestServer(t, objectServer.URL, content)
+	metadata.metadata.SHA3 = hex.EncodeToString(make([]byte, 64))
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
+	if err != nil {
+		t.Fatalf("GET error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+
+	if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
+		t.Fatalf("checksum-mismatched package was published, stat error = %v", err)
 	}
 }

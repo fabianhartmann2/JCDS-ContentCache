@@ -14,6 +14,7 @@ func validConfig() Config {
 		TokenURL:             "https://tenant.example/api/v1/oauth/token",
 		ClientID:             "client-id",
 		ClientSecret:         "client-secret",
+		CatalogURL:           "https://tenant.example/api/v1/jcds/files",
 		ResolverURLTemplate:  "https://tenant.example/api/files/{filename}",
 		DownloadURLField:     "uri",
 		AllowedDownloadHosts: []string{"download.example"},
@@ -47,5 +48,15 @@ func TestValidateRequiresOneResolverPlaceholder(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "exactly once") {
 		t.Fatalf("Validate() error = %v, want placeholder error", err)
+	}
+}
+
+func TestValidateRequiresHTTPSCatalogURL(t *testing.T) {
+	cfg := validConfig()
+	cfg.CatalogURL = "http://tenant.example/api/v1/jcds/files"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "JAMF_CATALOG_URL must use HTTPS") {
+		t.Fatalf("Validate() error = %v, want catalog HTTPS error", err)
 	}
 }

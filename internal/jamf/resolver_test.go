@@ -3,6 +3,7 @@ package jamf
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -12,6 +13,24 @@ import (
 type fakeTokens struct {
 	token         string
 	invalidations atomic.Int64
+}
+
+func TestResolveMapsObservedNotFoundResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"httpStatus": http.StatusNotFound,
+			"errors":     []any{},
+		})
+	}))
+	defer server.Close()
+
+	resolver := NewClient(server.Client(), &fakeTokens{token: "token"}, server.URL+"/{filename}", "uri")
+	_, err := resolver.Resolve(context.Background(), "Missing.pkg")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Resolve() error = %v, want ErrNotFound", err)
+	}
 }
 
 func (f *fakeTokens) Token(context.Context) (string, error) {

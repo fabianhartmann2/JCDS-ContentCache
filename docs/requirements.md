@@ -4,7 +4,7 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.2
+**Version:** 0.3
 
 **Date:** 27 August 2026
 
@@ -18,11 +18,11 @@
 
 ## 1. Executive summary
 
-The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through a company-controlled HTTPS endpoint such as https://packages.example.ch:8443/packages/ExampleFile.pkg. The canonical request path maps directly to a human-readable local path such as /srv/jamf-store/packages/ExampleFile.pkg. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written to hidden temporary storage; only a complete validated transfer is atomically published under the final original filename.
+The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through a company-controlled HTTPS endpoint such as https://packages.example.ch:8443/packages/ExampleFile.pkg. The canonical request path maps directly to a human-readable local path such as /srv/jamf-store/packages/ExampleFile.pkg. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, reads authoritative size and SHA3-512 metadata, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written and hashed in hidden temporary storage; only a transfer matching the Jamf catalog length and SHA3-512 digest is atomically published under the final original filename.
 
 The service is deliberately split into two components. NGINX owns TLS termination, normalized filesystem lookup, static-file delivery, miss routing, downstream streaming and request controls. A small purpose-built helper owns OAuth client-credentials authentication, Jamf API interaction, JSON parsing, signed-URL validation, upstream streaming, temporary-file management, atomic publication and per-package single-flight coordination. This separation keeps lifecycle-sensitive Jamf API logic out of the web server configuration while preserving a simple local file layout.
 
-> **Important dependency:** Jamf currently describes GET /api/v1/jcds/files/{fileName} as a deprecated endpoint. A sanitized tenant sample confirms that it returns the signed download URL in the JSON field `uri`. The implementation must confirm the supported replacement in the target Jamf Pro tenant and isolate Jamf-specific calls behind an adapter interface.
+> **Accepted dependency risk:** Jamf marks `GET /api/v1/jcds/files/{fileName}` and `GET /api/v1/jcds/files` as deprecated, and no replacement is currently available for this tenant. The first release will use these endpoints behind replaceable adapters, parse the resolver field `uri`, and verify the file-list fields `length` and `sha3`. The service owner must monitor Jamf deprecation notices and migrate when a replacement becomes available.
 
 ## 2. Business context and problem statement
 
@@ -81,6 +81,8 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 - Jamf API resolution of a package filename to a temporary JCDS download URL.
 
+- Jamf API lookup of authoritative package length and SHA3-512 metadata before publication.
+
 - Secure following of the approved download URL and upstream redirects.
 
 - A persistent human-readable package store using original filenames, a non-public temporary area, capacity protection, cleanup, pre-population and administrative removal.
@@ -122,6 +124,8 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Upstream               | One Jamf Pro tenant and JCDS are used in the first release.                                                                                                                | Baseline assumption |
 | Storage representation | A completed request path maps to the same human-readable local path and filename; for example, /packages/ExampleFile.pkg maps to /srv/jamf-store/packages/ExampleFile.pkg. | Resolved            |
 | Store rebuild          | The package store is derived data and can be rebuilt from JCDS; configuration and secrets require backup, package contents do not.                                         | Baseline assumption |
+| Jamf API version       | Use the deprecated v1 JCDS resolver and file-list endpoints until Jamf introduces replacements; isolate both behind adapters.                                              | Resolved            |
+| Publication integrity  | Require exact JCDS catalog `length` and SHA3-512 match before a downloaded package is atomically published.                                                                 | Resolved            |
 
 > **Normative language:** Must indicates a mandatory production requirement. Should indicates a recommended requirement that may only be waived through a documented design decision. May identifies an optional capability.
 
@@ -132,7 +136,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Service owner / Mac Workplace | Own requirements, client integration, service acceptance, package naming policy and support model.               |
 | Platform / infrastructure     | Provide and patch the Linux host, container runtime, storage, network, DNS, TLS and monitoring integration.      |
 | Security                      | Review authentication, secret storage, network controls, logging, image hardening and threat model.              |
-| Jamf administration           | Create the least-privilege API role/client and confirm the supported JCDS download endpoint and response schema. |
+| Jamf administration           | Create the least-privilege API role/client, monitor deprecated JCDS endpoints and provide sanitized schema evidence. |
 | Operations                    | Monitor the service, respond to alerts, rotate secrets, manage capacity and follow recovery procedures.          |
 | Managed clients               | Request packages using the published internal URL and supported HTTP behaviour.                                  |
 
@@ -140,15 +144,17 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 ### 7.1 Logical components
 
-**NGINX filesystem gateway:** Terminates downstream TLS; validates method and path; maps the canonical request URI to the final filesystem path; serves existing files; routes misses internally; streams responses; publishes successful full responses through proxy_store or an equivalent atomic writer; records delivery telemetry.
+**NGINX filesystem gateway:** Terminates downstream TLS; validates method and path; maps the canonical request URI to the final filesystem path; serves existing files; routes misses internally; streams helper responses; records delivery telemetry.
 
-**Jamf download helper:** Exposes an internal-only package endpoint; coordinates one fill per canonical package path; manages OAuth tokens; calls the Jamf resolver API; parses JSON; validates the resulting URL; follows allowed redirects; streams the JCDS response.
+**Jamf download helper:** Exposes an internal-only package endpoint; coordinates one fill per canonical package path; manages OAuth tokens; calls the JCDS catalog and resolver APIs; parses and validates metadata; validates the resulting URL; follows allowed redirects; streams and hashes the JCDS response; owns temporary files and atomic publication.
 
 **Persistent package-store volume:** Stores final package bytes under their original URL-derived names and keeps hidden temporary downloads on the same filesystem so publication can be atomic.
 
 **Jamf OAuth endpoint:** Issues a short-lived access token using the configured client ID and client secret.
 
 **Jamf JCDS resolver API:** Returns a temporary download URL for the requested package filename.
+
+**Jamf JCDS catalog API:** Returns package filenames, byte lengths, MD5 values, regions and SHA3-512 digests. Length and SHA3-512 are the publication-integrity controls.
 
 **JCDS/CDN object endpoint:** Provides the package bytes through the temporary, time-limited URL.
 
@@ -170,7 +176,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 |-----------------|-------------------------|--------------------------|-----------------------------------------------------|
 | Managed client  | NGINX gateway           | TCP 8443 / HTTPS         | Retrieve packages                                   |
 | NGINX gateway   | Jamf helper             | Container network / HTTP | Internal store-miss request                         |
-| Jamf helper     | Jamf Pro tenant         | TCP 443 / HTTPS          | OAuth token and download-URL API                    |
+| Jamf helper     | Jamf Pro tenant         | TCP 443 / HTTPS          | OAuth token, metadata catalog and download-URL APIs |
 | Jamf helper     | Approved JCDS/CDN hosts | TCP 443 / HTTPS          | Package download and allowed redirects              |
 | Host/containers | Enterprise services     | As approved              | DNS, time, certificate validation, logs and metrics |
 
@@ -196,15 +202,15 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 3.  The helper reuses a valid access token or obtains one with the OAuth client-credentials grant.
 
-4.  The helper calls the supported Jamf JCDS resolver endpoint with Authorization: Bearer {token} and Accept: application/json.
+4.  The helper obtains the exact package entry from the selected Jamf JCDS catalog endpoint and validates its `length` and `sha3` fields.
 
-5.  The helper validates the response, extracts the temporary URL and verifies its scheme, hostname, redirects and destination policy.
+5.  The helper calls the selected Jamf JCDS resolver endpoint with Authorization: Bearer {token} and Accept: application/json, extracts `uri`, and verifies its scheme, hostname, redirects and destination policy.
 
-6.  The helper requests the complete package and streams response bytes to NGINX without buffering the complete object in application memory.
+6.  The helper requests the complete package and rejects a declared upstream Content-Length that disagrees with the catalog before streaming begins.
 
-7.  NGINX streams received bytes to the first client while proxy_store or an equivalent writer saves them under the non-public temporary directory on the package-store filesystem.
+7.  The helper streams response bytes to NGINX without buffering the complete object in application memory while writing and hashing the same bytes under the non-public temporary directory.
 
-8.  After a successful complete 200 response and transfer validation, the temporary file is atomically renamed to the exact final URL-derived path. A failure, partial response or truncation leaves no file in the served namespace.
+8.  After a successful complete 200 response, exact byte-count match and SHA3-512 match, the helper atomically renames the temporary file to the exact final URL-derived path. A failure, partial response, truncation or digest mismatch leaves no file in the served namespace.
 
 9.  Waiting requests for the same canonical path are served from the completed final file.
 
@@ -252,9 +258,9 @@ The helper must cache the access token in memory, honor the returned expiration 
 
 ### FR-007 Jamf package resolution
 
-For a store miss, the helper must call the supported Jamf API with the requested filename and Bearer token, require a successful JSON response and extract exactly one download URL using a versioned response adapter. The observed deprecated v1 contract uses the JSON field `uri`; the field must remain configurable for a future replacement contract.
+For a store miss, the helper must use the selected deprecated Jamf APIs behind replaceable adapters until Jamf introduces replacements. It must find one exact filename entry from `GET /api/v1/jcds/files`, validate `length` and the 128-character hexadecimal `sha3` value, then call `GET /api/v1/jcds/files/{fileName}` and extract exactly one download URL from `uri`. The URL field and adapter contracts must remain configurable for future replacement APIs. An observed resolver `404` body containing `httpStatus: 404` and an empty `errors` array must map to package not found.
 
-> **Priority: Must. Acceptance:** Valid, not-found, malformed, unauthorized and deprecated-endpoint responses map to documented outcomes.
+> **Priority: Must. Acceptance:** Valid metadata/resolver, not-found, malformed, unauthorized, duplicate-entry, incomplete-page and deprecated-endpoint responses map to documented outcomes without leaking response bodies.
 
 ### FR-008 Temporary URL validation
 
@@ -270,9 +276,11 @@ On a store miss, the helper and NGINX must stream the upstream body so the first
 
 ### FR-010 Complete-file publication
 
-Only a complete successful full-package response with status 200 and valid transfer completion may become a reusable final file. The response must first be written under a non-public temporary path on the same filesystem and then atomically renamed to the exact final path. A 206 response, error body or incomplete transfer must never be published as the final package.
+Only a complete successful full-package response with status 200, an exact Jamf catalog byte-count match and a matching SHA3-512 digest may become a reusable final file. The response must first be written under a non-public temporary path on the same filesystem and then atomically renamed to the exact final path. A 206 response, error body, incomplete transfer, length mismatch or digest mismatch must never be published as the final package. MD5 may be recorded for interoperability but must not replace SHA3-512 verification.
 
-> **Priority: Must. Acceptance:** Interrupted, truncated, partial and failed transfers leave no regular file under the served final path.
+> **Priority: Must. Acceptance:** Interrupted, truncated, partial, length-mismatched, digest-mismatched and failed transfers leave no regular file under the served final path.
+
+Because the first client receives bytes before the complete digest is known, a final digest mismatch cannot retroactively change an already-started 200 response. The helper must terminate the fill, discard the temporary file and record a sanitized integrity failure; normal macOS package-signature validation remains the final client-side defense.
 
 ### FR-011 Concurrent miss coalescing
 
@@ -482,7 +490,7 @@ The helper must parse access_token, token_type and expires_in from a successful 
 | Final local file   | /srv/jamf-store/packages/ExampleFile.pkg                                          |
 | Temporary download | /srv/jamf-store/.temporary/{unique-id}.part                                       |
 | Hit lookup         | NGINX try_files checks only the normalized final regular-file path                |
-| Miss persistence   | NGINX proxy_store or an equivalent writer publishes only a complete full response |
+| Miss persistence   | The helper writes, verifies and atomically publishes from hidden temporary storage |
 
 The paths above define the baseline layout and may be changed through configuration, but the one-to-one relationship between the canonical client path and the human-readable final filesystem path is mandatory.
 
@@ -518,11 +526,13 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 - Do not store Jamf API JSON, OAuth error bodies, CDN HTML errors, redirects without the final package, partial 206 responses or disallowed HTTP statuses as final package content.
 
-- Validate Content-Length completion when provided and treat premature EOF as failure.
+- Retrieve the exact catalog entry for the requested immutable filename and reject missing, duplicate, malformed or incomplete-page metadata.
+
+- Treat catalog `length` and SHA3-512 as the authoritative publication checks. Reject a conflicting upstream Content-Length before streaming when possible, count all received bytes and compute SHA3-512 incrementally while streaming.
 
 - Preserve the full byte stream without transformation; compression and content rewriting must be disabled for package bodies.
 
-- Where Jamf exposes a trusted size or checksum, compare it before publishing the final file. This is an enhancement unless the exact metadata is confirmed.
+- Publish only after the downloaded byte count and computed SHA3-512 match the catalog. MD5 is retained only for compatibility or diagnostics and is not the integrity security boundary.
 
 - Client-side package signature verification remains part of the normal macOS installation trust chain and is not replaced by the local package store.
 
@@ -542,8 +552,8 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 | **Component**                   | **Purpose**                                                                                                                         | **Exposure**                                  |
 |---------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
-| nginx                           | TLS listener on 8443, try_files lookup, static delivery, internal miss routing, streaming and proxy_store or equivalent persistence | Client network + internal helper              |
-| jamf-download-helper            | Single-flight coordination, OAuth, Jamf resolver adapter, URL policy and JCDS streaming                                             | Internal container network only               |
+| nginx                           | TLS listener on 8443, try_files lookup, static delivery, internal miss routing and downstream streaming                             | Client network + internal helper              |
+| jamf-download-helper            | Single-flight coordination, OAuth, catalog/resolver adapters, URL policy, hashing, temporary files and atomic publication           | Internal container network only               |
 | Persistent package-store volume | Human-readable final packages and hidden temporary files                                                                            | Writable only by the package-publication path |
 | Secrets/certificates            | Jamf client secret, TLS key and trust configuration                                                                                 | Read-only mounts or approved secret provider  |
 
@@ -562,7 +572,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | **Area**        | **Required external configuration**                                                                                               |
 |-----------------|-----------------------------------------------------------------------------------------------------------------------------------|
 | Service         | hostname, listen port, TLS certificate/key paths, client access policy                                                            |
-| Jamf            | tenant base URL, OAuth path, resolver adapter/version, API client ID and secret reference                                         |
+| Jamf            | tenant base URL, OAuth path, catalog and resolver adapter versions, API client ID and secret reference                           |
 | Upstream policy | allowed signed-URL host patterns, redirect limit, DNS/IP restrictions, TLS trust                                                  |
 | Package store   | root, temporary path, maximum usage, cleanup/inactive retention, lock timeout, minimum free space, file ownership and permissions |
 | HTTP            | connect/read/send timeouts, maximum package size, range policy, client-abort behaviour                                            |
@@ -608,7 +618,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | AT-08  | Not found             | Request a filename absent from Jamf; verify a sanitized 404 and no final error-body file.                                                                                                        |
 | AT-09  | Input attacks         | Test traversal, encoding, absolute URLs, control characters and oversized names; verify rejection without upstream calls.                                                                        |
 | AT-10  | SSRF/redirect         | Return unsafe URLs and redirect chains from a mock resolver; verify every unsafe destination is blocked.                                                                                         |
-| AT-11  | Truncated upstream    | Terminate the JCDS stream early; verify the client fails, temporary state is discarded or quarantined and no final file exists.                                                                  |
+| AT-11  | Transfer integrity    | Terminate a stream early and inject wrong length and SHA3-512 metadata; verify temporary state is discarded and no final file exists.                                                            |
 | AT-12  | Range and HEAD        | Run the actual Mac client request patterns on local hits and store misses; verify static range responses and that a miss never publishes a partial 206 body as the final file.                   |
 | AT-13  | Disk pressure         | Reach configured capacity and minimum-free-space thresholds; verify cleanup/alerts and controlled failure without deleting active fills.                                                         |
 | AT-14  | Restart recovery      | Restart containers and reboot the host; verify complete entries survive and temporary state is handled safely.                                                                                   |
@@ -617,7 +627,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | AT-17  | Secret redaction      | Inspect responses, logs, metrics, crash output, temporary files and the final package namespace for credentials, tokens and signed URLs.                                                         |
 | AT-18  | Store administration  | Atomically pre-populate one validated package and verify a local HIT without Jamf access; remove it through the administrative procedure, verify the audit record and observe a subsequent MISS. |
 | AT-19  | Load                  | Test agreed concurrent clients, largest package and hit throughput without resource exhaustion.                                                                                                  |
-| AT-20  | Adapter compatibility | Run resolver contract tests against the supported Jamf API response and a mocked future adapter version.                                                                                         |
+| AT-20  | Adapter compatibility | Run catalog and resolver contract tests against the selected deprecated responses and mocked future replacement adapters.                                                                        |
 
 ### 14.1 Production acceptance gates
 
@@ -639,7 +649,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 | **Risk**                     | **Impact**                                                                                                | **Primary mitigation**                                                                                                                                   |
 |------------------------------|-----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Deprecated Jamf endpoint     | The referenced resolver endpoint may be removed or changed.                                               | Confirm the supported replacement before build; isolate it behind a versioned adapter and contract tests.                                                |
+| Deprecated Jamf endpoints    | The selected resolver and catalog endpoints may be removed or changed before Jamf introduces replacements. | Accept and monitor the dependency risk; isolate both behind versioned adapters and migrate without changing client URLs when replacements appear.        |
 | Single-host outage           | Host or storage failure makes the service unavailable.                                                    | Document and accept the initial risk; automate restart/rebuild and define a later HA option if the SLO requires it.                                      |
 | Signed-URL destination drift | JCDS/CDN hostnames may change and break a strict allowlist.                                               | Base the policy on Jamf-published domains, monitor rejections and use controlled configuration change rather than arbitrary egress.                      |
 | Unsafe or partial-file publication | An interrupted transfer or tampered filesystem object could be exposed as a valid package. | Serve regular files only; deny symbolic links; keep temporary files outside the served namespace; publish only a complete validated 200 response by atomic rename; audit permissions and unexpected objects. |
@@ -652,12 +662,11 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 The following items are intentionally explicit. Recommended defaults permit detailed design to proceed, but the stated decision deadline shows when confirmation becomes mandatory.
 
-#### OQ-01 — Jamf API contract (IN REVIEW)
+#### OQ-01 — Jamf API contract (RESOLVED)
 
-- **Observed evidence:** The deprecated `GET /api/v1/jcds/files/{fileName}` endpoint returned a successful JSON object whose signed download URL is in `uri`.
-- **Decision still required:** Which supported replacement endpoint and response field supersede this contract in the target tenant?
-- **Recommended default:** Keep the observed contract behind the configurable adapter, validate the tenant's `/api/doc`, and capture sanitized error responses before architecture sign-off.
-- **Required by:** Architecture sign-off
+- **Observed evidence:** The deprecated `GET /api/v1/jcds/files/{fileName}` endpoint returns a successful JSON object whose signed download URL is in `uri`; an absent file returns HTTP 404 with `httpStatus` and an empty `errors` array.
+- **Decision:** Use this deprecated endpoint until Jamf introduces a replacement. Keep it behind a configurable adapter, monitor Jamf deprecation notices and capture remaining non-404 error responses for resilience tests.
+- **Required follow-up:** Migration trigger and runbook before production approval
 
 #### OQ-02 — Client access control (OPEN)
 
@@ -720,11 +729,17 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Limit the first release to one canonical filename segment ending in `.pkg`; add other types or nested paths only with explicit validation and filesystem-mapping rules.
 - **Required by:** API contract freeze
 
-#### OQ-12 — Integrity metadata (OPEN)
+#### OQ-12 — Integrity metadata (RESOLVED)
 
-- **Decision required:** Does Jamf expose an authoritative size or checksum that can be verified before final-file publication?
-- **Recommended default:** Preserve transport length and rely on normal signed-package validation initially; add checksum verification when trusted metadata is available.
-- **Required by:** Implementation design
+- **Observed evidence:** Deprecated `GET /api/v1/jcds/files` returns `fileName`, `length`, `md5`, `region` and a 128-character hexadecimal `sha3` value for each package.
+- **Decision:** Require exact `length` and SHA3-512 match before atomic publication. MD5 is non-authoritative and retained only for interoperability or diagnostics.
+- **Required follow-up:** Production contract and checksum-mismatch acceptance test
+
+#### OQ-13 — Catalog response shape (RESOLVED)
+
+- **Observed evidence:** The complete `GET /api/v1/jcds/files` response begins with `[` and is a top-level JSON array of metadata entries without a pagination envelope.
+- **Decision:** Parse the observed complete array. If a future response uses an envelope that reports more records than it contains, fail explicitly instead of returning a false not-found result.
+- **Required follow-up:** Retain contract tests and monitor the deprecated endpoint for schema changes.
 
 ### 16.1 Confirmed decisions
 
@@ -733,6 +748,9 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-01   | Delivery stage         | Production system.                                                                                                                                              |
 | D-02   | Package identity       | Filenames are immutable; corrected versions receive new names.                                                                                                  |
 | D-03   | Initial deployment     | NGINX and helper containers on one managed Linux host.                                                                                                          |
+| D-04   | Jamf API lifecycle     | Use the deprecated JCDS resolver and catalog endpoints until Jamf introduces replacements; keep both behind replaceable adapters.                                |
+| D-05   | Publication integrity  | Require catalog length and SHA3-512 verification before atomic publication; do not treat MD5 as the security boundary.                                           |
+| D-06   | Catalog response       | Treat the observed JCDS metadata response as one complete top-level JSON array; fail closed on a future detected partial envelope.                                |
 | D-04   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
 
 ## 17. Delivery plan
@@ -750,7 +768,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 Resolve the remaining questions in this order because each answer constrains the next layer of design:
 
-1.  Capture the supported Jamf API contract and a redacted example response (OQ-01).
+1.  Capture the remaining sanitized Jamf authentication, throttle and server-error shapes.
 
 2.  Capture actual client GET/HEAD/Range behaviour and workload scale (OQ-03 and OQ-05).
 
@@ -760,7 +778,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 5.  Assign DNS/TLS, secrets, monitoring and operational ownership (OQ-08 to OQ-10).
 
-6.  Freeze the client path contract and integrity controls (OQ-11 and OQ-12).
+6.  Freeze the client path contract (OQ-11) and verify the resolved integrity policy (OQ-12) in production-like tests.
 
 ## Appendix A. Error handling matrix
 
@@ -771,9 +789,11 @@ Resolve the remaining questions in this order because each answer constrains the
 | OAuth credentials rejected          | 502/503             | Retry only according to token policy            | jamf_auth_failed        |
 | Jamf resolver timeout               | 504                 | Bounded retry only if approved                  | jamf_resolver_timeout   |
 | Malformed resolver JSON             | 502                 | Do not follow URL                               | jamf_response_invalid   |
+| Catalog missing/duplicate/incomplete| 502/404 by condition | Do not resolve or download                     | jamf_catalog_invalid    |
 | Signed URL rejected                 | 502                 | Do not connect                                  | download_url_rejected   |
 | JCDS not found/expired URL          | 502/404 by policy   | May resolve one new URL and retry once          | jcds_download_failed    |
 | Upstream transfer interrupted       | 5xx or stream reset | Discard or quarantine incomplete temporary file | upstream_incomplete     |
+| Length or SHA3-512 mismatch          | Stream reset/logged failure | Discard temporary file; never publish final file | package_integrity_failed |
 | Store write/disk full               | 507/5xx             | Do not publish final file; alert                | package_store_failed    |
 | Local file available, upstream down | 200/206             | Serve immutable final file                      | local_hit               |
 
@@ -783,7 +803,7 @@ Resolve the remaining questions in this order because each answer constrains the
 |---------------|--------------------------------------------------------------------------------------------------------------------|
 | Request       | request count, status, duration, bytes, method, sanitized package label                                            |
 | Package store | LOCAL/JCDS source, hits, misses, final files/bytes, temporary bytes, lock wait, cleanup and administrative changes |
-| Helper        | active streams, resolver latency/status, download latency/status, redirects rejected                               |
+| Helper        | active streams, catalog/resolver latency and status, integrity failures, download latency/status, redirects rejected |
 | OAuth         | refresh attempts, success/failure, token time-to-expiry; never token value                                         |
 | Storage       | final bytes/files, free bytes/percent, temporary bytes, unsafe objects and publication failures                    |
 | Runtime       | container health, restarts, CPU, memory, network and open connections                                              |
@@ -806,16 +826,16 @@ Resolve the remaining questions in this order because each answer constrains the
 
 [Jamf: Retrieve a download URL for a specific JCDS file](https://developer.jamf.com/jamf-pro/reference/get_v1-jcds-files-filename)
 
+[Jamf: Retrieve a list of JCDS files and metadata](https://developer.jamf.com/jamf-pro/reference/get_v1-jcds-files)
+
 [Jamf: Obtain an access token using an API Client](https://developer.jamf.com/jamf-pro/reference/postoauthtoken)
 
 [Jamf: Client Credentials](https://developer.jamf.com/jamf-pro/docs/client-credentials)
 
+[Jamf: Privileges and deprecations](https://developer.jamf.com/jamf-pro/docs/privileges-and-deprecations)
+
 [Jamf: JCDS communication](https://learn.jamf.com/r/en-US/technical-articles/Jamf_Cloud_Distribution_Service_Communication)
 
 [NGINX: try_files directive](https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files)
-
-[NGINX: proxy_store directive](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_store)
-
-[NGINX: proxy_store and full 200 responses](https://trac.nginx.org/nginx/ticket/258)
 
 *Reference status reviewed 27 August 2026. The target Jamf Pro tenant's own /api/doc remains authoritative for endpoint availability and schema at implementation time.*

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha3"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +30,7 @@ type Server struct {
 	logger          *slog.Logger
 	store           *store.Store
 	flights         *store.Flights
+	metadata        jamf.MetadataSource
 	resolver        jamf.Resolver
 	downloader      objectSource
 	fillTimeout     time.Duration
@@ -37,6 +40,7 @@ type Server struct {
 func New(
 	logger *slog.Logger,
 	packageStore *store.Store,
+	metadata jamf.MetadataSource,
 	resolver jamf.Resolver,
 	downloader objectSource,
 	fillTimeout time.Duration,
@@ -46,6 +50,7 @@ func New(
 		logger:          logger,
 		store:           packageStore,
 		flights:         store.NewFlights(),
+		metadata:        metadata,
 		resolver:        resolver,
 		downloader:      downloader,
 		fillTimeout:     fillTimeout,
@@ -139,6 +144,14 @@ func (s *Server) handlePackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, filename string) error {
+	metadata, err := s.metadata.Lookup(ctx, filename)
+	if err != nil {
+		return err
+	}
+	if metadata.Length > s.maxPackageBytes {
+		return errors.New("Jamf catalog length exceeds the configured maximum package size")
+	}
+
 	downloadURL, err := s.resolver.Resolve(ctx, filename)
 	if err != nil {
 		return err
@@ -148,6 +161,9 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 		return err
 	}
 	defer upstream.Body.Close()
+	if upstream.ContentLength >= 0 && upstream.ContentLength != metadata.Length {
+		return errors.New("upstream Content-Length does not match Jamf catalog metadata")
+	}
 
 	pending, err := s.store.Begin(filename)
 	if err != nil {
@@ -156,13 +172,12 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 	defer pending.Abort()
 
 	copySafeHeaders(w.Header(), upstream.Header, filename)
-	if upstream.ContentLength >= 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(upstream.ContentLength, 10))
-	}
+	w.Header().Set("Content-Length", strconv.FormatInt(metadata.Length, 10))
 	w.Header().Set("X-Package-Source", "JCDS")
 	w.WriteHeader(http.StatusOK)
 
 	buffer := make([]byte, 64*1024)
+	hasher := sha3.New512()
 	var downloaded int64
 	clientConnected := true
 	for {
@@ -174,6 +189,9 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 			}
 			if _, err := pending.Write(buffer[:readBytes]); err != nil {
 				return fmt.Errorf("write temporary package: %w", err)
+			}
+			if _, err := hasher.Write(buffer[:readBytes]); err != nil {
+				return fmt.Errorf("hash temporary package: %w", err)
 			}
 			if clientConnected {
 				if _, err := w.Write(buffer[:readBytes]); err != nil {
@@ -192,10 +210,17 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 		}
 	}
 
-	if err := pending.Commit(upstream.ContentLength); err != nil {
+	if downloaded != metadata.Length {
+		return fmt.Errorf("downloaded %d bytes, Jamf catalog expected %d", downloaded, metadata.Length)
+	}
+	actualSHA3 := hex.EncodeToString(hasher.Sum(nil))
+	if !strings.EqualFold(actualSHA3, metadata.SHA3) {
+		return errors.New("downloaded package SHA3-512 does not match Jamf catalog metadata")
+	}
+	if err := pending.Commit(metadata.Length); err != nil {
 		return err
 	}
-	s.logger.Info("package published", "filename", filename, "bytes", downloaded)
+	s.logger.Info("package published", "filename", filename, "bytes", downloaded, "integrity", "sha3-512")
 	return nil
 }
 

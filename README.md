@@ -6,7 +6,7 @@
 https://packages.example.ch:8443/packages/ExampleFile.pkg
 ```
 
-NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name.
+NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
 > This repository is an early mock-driven implementation. It must not be connected to production Jamf credentials until the external API contract, destination allowlist, client range behavior, and security controls in the execution plan are validated.
@@ -16,11 +16,12 @@ NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cach
 Milestone M1 demonstrates the complete local lifecycle without credentials:
 
 1. First `GET` is routed through the helper.
-2. Mock OAuth and resolver endpoints return a temporary object URL.
-3. The helper begins streaming while it writes a hidden `.part` file.
-4. A complete object is atomically published under its canonical filename.
-5. The next request is served directly by NGINX.
-6. Concurrent misses for the same filename share one upstream fill.
+2. Mock OAuth and catalog endpoints return package length and SHA3-512 metadata.
+3. The mock resolver returns a temporary object URL.
+4. The helper begins streaming while it writes and hashes a hidden `.part` file.
+5. A length- and SHA3-validated object is atomically published under its canonical filename.
+6. The next request is served directly by NGINX.
+7. Concurrent misses for the same filename share one upstream fill.
 
 The v1 prototype accepts one filename segment ending in `.pkg`. This is a provisional implementation of open question OQ-11, not yet a final production decision.
 
@@ -73,7 +74,7 @@ internal/auth/          OAuth token reuse and refresh
 internal/config/        Environment parsing and validation
 internal/download/      Download URL and redirect policy
 internal/httpapi/       Health and package request handlers
-internal/jamf/          Replaceable Jamf resolver adapter
+internal/jamf/          Replaceable Jamf resolver and metadata-catalog adapters
 internal/store/         Temporary files, publication and single-flight locks
 deploy/compose/         Local development stack
 deploy/nginx/           Development and production NGINX templates
@@ -91,10 +92,11 @@ docs/                   Requirements, execution plan and contract evidence
 - Never commit Jamf client credentials, OAuth tokens, temporary signed URLs, or unsanitized API responses.
 - The helper accepts only a validated package filename and never accepts a client-supplied upstream URL.
 - Every resolved URL and redirect is checked against the configured hostname allowlist.
+- Jamf catalog length and SHA3-512 metadata are verified before a downloaded file is published.
+- MD5 is parsed for interoperability but is not used as the security integrity boundary.
 - NGINX receives read-only access to completed package storage; the helper owns publication.
 - Hidden temporary storage is outside the namespace served by NGINX.
 
 ## License
 
 No open-source license has been selected yet. Until the repository owner adds one, normal copyright restrictions apply.
-

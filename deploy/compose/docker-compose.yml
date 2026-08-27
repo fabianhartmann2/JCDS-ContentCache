@@ -49,6 +49,7 @@ services:
       JAMF_TOKEN_URL: http://mock-upstream:8081/api/v1/oauth/token
       JAMF_CLIENT_ID: mock-client
       JAMF_CLIENT_SECRET: mock-secret
+      JAMF_CATALOG_URL: http://mock-upstream:8081/api/v1/jcds/files
       JAMF_RESOLVER_URL_TEMPLATE: http://mock-upstream:8081/api/v1/jcds/files/{filename}
       JAMF_DOWNLOAD_URL_FIELD: uri
       JCDS_ALLOWED_HOSTS: mock-upstream

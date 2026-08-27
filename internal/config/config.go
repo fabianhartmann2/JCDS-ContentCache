@@ -19,6 +19,7 @@ type Config struct {
 	TokenURL             string
 	ClientID             string
 	ClientSecret         string
+	CatalogURL           string
 	ResolverURLTemplate  string
 	DownloadURLField     string
 	AllowedDownloadHosts []string
@@ -37,6 +38,7 @@ func Load() (Config, error) {
 		TokenURL:            strings.TrimSpace(os.Getenv("JAMF_TOKEN_URL")),
 		ClientID:            strings.TrimSpace(os.Getenv("JAMF_CLIENT_ID")),
 		ClientSecret:        os.Getenv("JAMF_CLIENT_SECRET"),
+		CatalogURL:          strings.TrimSpace(os.Getenv("JAMF_CATALOG_URL")),
 		ResolverURLTemplate: strings.TrimSpace(os.Getenv("JAMF_RESOLVER_URL_TEMPLATE")),
 		DownloadURLField:    envOrDefault("JAMF_DOWNLOAD_URL_FIELD", "uri"),
 	}
@@ -88,6 +90,9 @@ func (c Config) Validate() error {
 		validationErrors = append(validationErrors, errors.New("JAMF_CLIENT_SECRET is required"))
 	}
 	if err := validateServiceURL("JAMF_TOKEN_URL", c.TokenURL, c.AllowHTTP); err != nil {
+		validationErrors = append(validationErrors, err)
+	}
+	if err := validateServiceURL("JAMF_CATALOG_URL", c.CatalogURL, c.AllowHTTP); err != nil {
 		validationErrors = append(validationErrors, err)
 	}
 	if strings.Count(c.ResolverURLTemplate, resolverFilenamePlaceholder) != 1 {

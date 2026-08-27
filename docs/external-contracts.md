@@ -1,13 +1,13 @@
 # External contract evidence
 
-**Status:** Partial sanitized tenant evidence captured; error and replacement-endpoint contracts remain open  
-**Related questions:** OQ-01, OQ-05, OQ-06 and OQ-12
+**Status:** Sanitized resolver, not-found, metadata, and top-level catalog contracts captured; redirect and remaining error contracts are open  
+**Related questions:** OQ-01, OQ-05, OQ-06, OQ-12, and OQ-13
 
-Do not add credentials, access tokens, cookies, signed query parameters, tenant-sensitive package names, or internal hostnames to this file.
+Do not add credentials, access tokens, cookies, signed query parameters, tenant-sensitive package names, package digests, or internal hostnames to this file.
 
 ## Jamf OAuth contract
 
-- Token endpoint: Official Jamf documentation currently specifies `POST /api/v1/oauth/token`; confirm the exact path in the target tenant.
+- Token endpoint: Official Jamf documentation specifies `POST /api/v1/oauth/token`; confirm the exact path in the target tenant.
 - Request content type: `application/x-www-form-urlencoded`
 - Required fields: `client_id`, `client_secret`, and `grant_type=client_credentials`
 - Successful response fields:
@@ -16,13 +16,14 @@ Do not add credentials, access tokens, cookies, signed query parameters, tenant-
 
 ## Jamf file-resolution contract
 
-- Observed endpoint and version: `GET /api/v1/jcds/files/{fileName}`
+- Selected endpoint and version: Deprecated `GET /api/v1/jcds/files/{fileName}`
+- Endpoint decision: Use this endpoint until Jamf introduces a supported replacement. Keep the call behind the adapter and monitor Jamf deprecation notices.
 - Required authorization: `Authorization: Bearer <access-token>`
 - Required privilege: `Read Jamf Cloud Distribution Service Files`
-- Deprecation/replacement status: Jamf's public reference marks the observed endpoint as deprecated; the supported replacement remains to be identified in the tenant's `/api/doc`.
 - Filename encoding behavior: One flat `.pkg` filename was successfully resolved; broader encoding and nested-path behavior remain unverified.
 - Download URL JSON field: `uri`
-- Not-found response:
+- Not-found status: `404`
+- Not-found JSON fields: `httpStatus` with value `404`, and an empty `errors` array
 - Unauthorized response:
 - Throttle response:
 - Server-error response:
@@ -31,25 +32,61 @@ Do not add credentials, access tokens, cookies, signed query parameters, tenant-
 
 ```json
 {
-  "uri": "https://<distribution>.cloudfront.net/<opaque-object-id>?<signed-query-redacted>"
+  "uri": "https://<approved-distribution-host>/<opaque-object-id>?<signed-query-redacted>"
 }
 ```
 
-The observed response contains only the signed URL. It does not provide an object size, checksum, ETag, last-modified value or URL lifetime as separate JSON fields.
+The resolver response contains only the signed URL. Object integrity metadata is obtained separately from the JCDS file-list endpoint.
+
+### Sanitized not-found response
+
+```json
+{
+  "httpStatus": 404,
+  "errors": []
+}
+```
+
+## Jamf file-metadata contract
+
+- Observed endpoint: Deprecated `GET /api/v1/jcds/files`
+- Endpoint decision: Use this endpoint until Jamf introduces a supported replacement. Keep it behind the same replaceable Jamf adapter boundary.
+- Required authorization: `Authorization: Bearer <access-token>`
+- Required privilege: `Read Jamf Cloud Distribution Service Files`
+- Observed entry fields: `fileName`, `length`, `md5`, `region`, and `sha3`
+- Filename match: Exact, case-sensitive match against the requested canonical filename
+- Authoritative publication checks: `length` and `sha3`
+- Digest interpretation: Observed `sha3` values contain 128 hexadecimal characters and are treated as SHA3-512 digests.
+- MD5 policy: Retain for diagnostics/interoperability only; do not use MD5 as the security integrity boundary.
+- Top-level shape: The complete observed response begins with `[` and is a JSON array of file entries. No pagination envelope or page metadata is present in the observed contract.
+- Defensive behavior: The adapter accepts the observed complete array and fails explicitly if a future response uses an incomplete paginated envelope rather than returning a false not-found result.
+
+### Sanitized metadata fragment
+
+```json
+[
+  {
+    "fileName": "Synthetic_App-1.2.3.pkg",
+    "length": 123456789,
+    "md5": "<32-hex-characters>",
+    "region": "<distribution-region>",
+    "sha3": "<128-hex-characters>"
+  }
+]
+```
 
 ## Temporary JCDS object contract
 
 - Observed destination class: An HTTPS AWS CloudFront distribution. The exact tenant-specific hostname is intentionally omitted from this public repository and must be supplied through deployment configuration.
-- Approved hostname(s): Not finalized. Start with exact observed hostnames; do not use a broad `*.cloudfront.net` allowlist.
+- Approved hostname(s): The observed resolver responses use one stable destination hostname, but the production inventory is not yet finalized. Configure exact hostnames; do not use a broad wildcard allowlist.
 - Approved redirects: Not yet observed or tested. Every redirect must be revalidated against the same exact-host policy.
 - URL lifetime: Encoded in the signed URL's `Expires` query parameter. More samples are required to establish the normal validity duration.
-- Observed signed-query fields: `response-content-disposition`, `url-uuid`, `Expires`, `Signature`, and `Key-Pair-Id`; values must never be logged or committed.
+- Signed-query values must never be logged or committed.
 - Successful status:
 - `Content-Length`:
 - `Content-Type`:
 - `ETag`:
 - `Last-Modified`:
-- Checksum metadata:
 - `HEAD` support:
 - Single-range support:
 - Multi-range support:
@@ -68,11 +105,13 @@ The observed response contains only the signed URL. It does not provide an objec
 
 - Captured by: Project owner
 - Capture date: 2026-08-27
-- Sanitized by: Codex; all token, tenant, package, object, hostname and signed-query values removed
+- Sanitized by: Codex; all token, tenant, package, object, hostname, digest, and signed-query values removed
 - Reviewed by: Pending Jamf and security review
-- Decision-register updates: OQ-01 and OQ-06 moved to `IN REVIEW`; OQ-12 remains open because the resolver payload contains no integrity metadata.
+- Decision-register updates: OQ-01, OQ-12 and OQ-13 are resolved for the current deprecated adapter; OQ-06 remains `IN REVIEW`.
 
 ## Authoritative references
 
+- [Jamf: Retrieve a list of JCDS files and metadata](https://developer.jamf.com/jamf-pro/reference/get_v1-jcds-files)
 - [Jamf: Retrieve a download URL for a specific JCDS file](https://developer.jamf.com/jamf-pro/reference/get_v1-jcds-files-filename)
 - [Jamf: Obtain an access token using an API Client](https://developer.jamf.com/jamf-pro/reference/postoauthtoken)
+- [Jamf: Privileges and deprecations](https://developer.jamf.com/jamf-pro/docs/privileges-and-deprecations)

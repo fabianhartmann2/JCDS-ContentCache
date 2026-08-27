@@ -54,6 +54,11 @@ func run(logger *slog.Logger) error {
 		cfg.ResolverURLTemplate,
 		cfg.DownloadURLField,
 	)
+	catalog := jamf.NewCatalogClient(
+		serviceClient,
+		tokenProvider,
+		cfg.CatalogURL,
+	)
 	downloadClient := download.NewClient(
 		&http.Client{Transport: newTransport()},
 		download.NewPolicy(cfg.AllowedDownloadHosts, cfg.AllowHTTP),
@@ -62,6 +67,7 @@ func run(logger *slog.Logger) error {
 	api := httpapi.New(
 		logger,
 		packageStore,
+		catalog,
 		resolver,
 		downloadClient,
 		cfg.FillTimeout,

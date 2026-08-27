@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha3"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/jamf"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
 )
 
@@ -31,6 +35,7 @@ type mockService struct {
 	chunkDelay   time.Duration
 	chunkSize    int
 	tokenCalls   atomic.Int64
+	catalogCalls atomic.Int64
 	resolveCalls atomic.Int64
 	objectCalls  atomic.Int64
 }
@@ -65,6 +70,7 @@ func run(logger *slog.Logger) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/oauth/token", service.handleToken)
+	mux.HandleFunc("GET /api/v1/jcds/files", service.handleCatalog)
 	mux.HandleFunc("GET /api/v1/jcds/files/{filename}", service.handleResolve)
 	mux.HandleFunc("GET /objects/{filename}", service.handleObject)
 	mux.HandleFunc("HEAD /objects/{filename}", service.handleObject)
@@ -134,7 +140,12 @@ func (s *mockService) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := os.Stat(filepath.Join(s.fixtureRoot, filename)); errors.Is(err, os.ErrNotExist) {
-		http.Error(w, "not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"httpStatus": http.StatusNotFound,
+			"errors":     []any{},
+		})
 		return
 	} else if err != nil {
 		http.Error(w, "fixture error", http.StatusInternalServerError)
@@ -144,6 +155,60 @@ func (s *mockService) handleResolve(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"uri": s.publicBase + "/objects/" + url.PathEscape(filename),
 	})
+}
+
+func (s *mockService) handleCatalog(w http.ResponseWriter, r *http.Request) {
+	s.catalogCalls.Add(1)
+	if !constantTimeEqual(r.Header.Get("Authorization"), "Bearer mock-access-token") {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	entries, err := os.ReadDir(s.fixtureRoot)
+	if err != nil {
+		http.Error(w, "fixture error", http.StatusInternalServerError)
+		return
+	}
+	metadata := make([]jamf.FileMetadata, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || store.ValidateFilename(entry.Name()) != nil {
+			continue
+		}
+		item, err := fixtureMetadata(filepath.Join(s.fixtureRoot, entry.Name()), entry.Name())
+		if err != nil {
+			http.Error(w, "fixture error", http.StatusInternalServerError)
+			return
+		}
+		metadata = append(metadata, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metadata)
+}
+
+func fixtureMetadata(path, filename string) (jamf.FileMetadata, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return jamf.FileMetadata{}, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return jamf.FileMetadata{}, err
+	}
+	md5Hash := md5.New()
+	sha3Hash := sha3.New512()
+	if _, err := io.Copy(io.MultiWriter(md5Hash, sha3Hash), file); err != nil {
+		return jamf.FileMetadata{}, err
+	}
+	return jamf.FileMetadata{
+		FileName: filename,
+		Length:   info.Size(),
+		MD5:      hex.EncodeToString(md5Hash.Sum(nil)),
+		Region:   "mock-region-1",
+		SHA3:     hex.EncodeToString(sha3Hash.Sum(nil)),
+	}, nil
 }
 
 func (s *mockService) handleObject(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +269,7 @@ func (s *mockService) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]int64{
 		"token_requests":   s.tokenCalls.Load(),
+		"catalog_requests": s.catalogCalls.Load(),
 		"resolve_requests": s.resolveCalls.Load(),
 		"object_requests":  s.objectCalls.Load(),
 	})

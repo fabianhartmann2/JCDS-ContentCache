@@ -38,7 +38,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 ## 3. Implementation principles
 
 1. Build a thin end-to-end slice before adding production hardening.
-2. Keep Jamf-specific behavior behind an adapter interface because the referenced endpoint is deprecated.
+2. Use the selected deprecated JCDS endpoints until Jamf introduces replacements, and keep Jamf-specific behavior behind adapter interfaces so migration does not alter client URLs.
 3. Treat the filesystem as a publication boundary: clients may only see complete final files.
 4. Normalize and validate a package name before any filesystem lookup or upstream request.
 5. Stream bytes; never buffer a complete package in memory.
@@ -53,13 +53,17 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 **Goal:** Remove external unknowns that could invalidate the helper or NGINX design.
 
 - [ ] Create a dedicated read-only Jamf API client for development.
-- [ ] Confirm the supported file-resolution endpoint in the target tenant's `/api/doc`.
+- [x] Record the decision to use deprecated `GET /api/v1/jcds/files/{fileName}` until Jamf introduces a replacement.
 - [x] Capture a redacted successful file-resolution JSON response.
-- [ ] Capture redacted not-found, unauthorized, rate-limit and server-error responses.
+- [x] Capture the redacted resolver not-found status and JSON shape.
+- [ ] Capture redacted unauthorized, rate-limit and server-error responses.
 - [x] Record the precise field containing the temporary download URL (`uri`).
+- [x] Capture sanitized JCDS file-list metadata fields: `fileName`, `length`, `md5`, `region`, and `sha3`.
+- [x] Confirm that the complete file-list response is a top-level JSON array without a pagination envelope.
 - [ ] Record OAuth token response fields, expiry behavior and relevant error responses.
 - [ ] Identify approved JCDS hostnames and every permitted redirect destination.
-- [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, checksums and range support.
+- [x] Establish JCDS catalog `length` and SHA3-512 as the publication-integrity source of truth.
+- [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, and range support.
 - [ ] Capture representative Mac client requests for `GET`, `HEAD`, single-range resume and any multi-range behavior.
 - [ ] Confirm whether the first store-miss request will always fetch a complete object even when the client requests a range.
 - [ ] Confirm the v1 path model: one filename segment ending in `.pkg`, or nested subdirectories.
@@ -82,6 +86,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement an in-memory OAuth token provider with an expiry safety margin.
 - [x] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
 - [x] Define a replaceable Jamf file-resolver interface.
+- [x] Add a replaceable JCDS metadata-catalog interface and strict response validation.
 - [x] Validate resolved URLs against HTTPS, hostname and redirect policy.
 - [x] Implement streaming object download without whole-file memory buffering.
 - [x] Implement same-filesystem temporary files and atomic publication.
@@ -92,6 +97,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
 - [x] Add structured logs with automatic sensitive-field exclusion.
 - [x] Add basic liveness and readiness endpoints.
+- [x] Verify catalog length and SHA3-512 before atomic publication.
 
 **Milestone M1 acceptance evidence**
 
@@ -118,7 +124,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Add bounded retries with backoff only for safe transient operations.
 - [ ] Add maximum object size and minimum-free-space protections.
 - [ ] Add temporary-file cleanup after failure, restart and age threshold.
-- [ ] Define checksum or signature validation policy and implement available metadata checks.
+- [x] Require Jamf catalog length and SHA3-512 validation before publishing a downloaded package; retain MD5 for interoperability only.
 - [ ] Add non-root containers, read-only root filesystems where practical and minimal Linux capabilities.
 - [ ] Add dependency, image and source scanning to CI.
 
@@ -177,11 +183,12 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 
 | ID | Decision | Priority | Current status | Recommended starting position | Evidence needed |
 |---|---|---:|---|---|---|
-| OQ-01 | Exact supported Jamf file-resolution API contract | Blocking | IN REVIEW | Observed deprecated `GET /api/v1/jcds/files/{fileName}` returns the signed URL in `uri`; keep it behind an adapter | Tenant `/api/doc` replacement/version confirmation plus redacted error responses |
+| OQ-01 | Jamf file-resolution API contract | Blocking | RESOLVED | Use deprecated `GET /api/v1/jcds/files/{fileName}` and parse `uri` until Jamf introduces a replacement; map the observed 404 payload to not found | Monitor Jamf deprecation notices; capture remaining non-404 error responses for resilience tests |
 | OQ-05 | Client and upstream range-request behavior | Blocking | OPEN | Capture real client traffic; on a miss fetch and publish the full object | `GET`, `HEAD`, resume and multi-range captures; JCDS response behavior |
 | OQ-06 | Permitted JCDS hosts and redirects | Blocking | IN REVIEW | One exact CloudFront distribution class is observed; allow exact configured hostnames only and revalidate redirects | Additional production samples and redirect behavior; approved runtime hostname inventory |
 | OQ-11 | Flat filenames or nested paths | Blocking | OPEN | V1 accepts one filename segment ending in `.pkg` | Required package naming examples and collision analysis |
-| OQ-12 | Integrity source of truth | High | OPEN | Require complete transfer and valid package signatures initially; use upstream checksum when available | JCDS metadata/header inventory and enterprise validation policy |
+| OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
+| OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | OPEN | Measure before fixing performance limits | Package count/size distribution, peak clients, common simultaneous requests |
 | OQ-07 | Store capacity and retention | High | OPEN | Treat 500 GB and 180 days as provisional only | Inventory growth, reuse interval, disk budget and operational cleanup policy |
 | OQ-02 | Client access control | High | OPEN | Server TLS plus enterprise-network allowlist; add mTLS if network trust is insufficient | Client network paths, proxy/VPN behavior and security policy |
@@ -194,14 +201,15 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 
 Repository scaffolding and mock-driven implementation can begin immediately. Real Jamf adapter completion is ready when:
 
-- [ ] OQ-01 has a sanitized but structurally complete API contract.
+- [x] OQ-01 has a sanitized successful and not-found contract plus an explicit deprecated-endpoint decision.
 - [ ] OQ-05 has enough evidence to select the miss/range policy.
 - [ ] OQ-06 has an enforceable destination and redirect allowlist.
 - [ ] OQ-11 fixes the canonical path model.
+- [x] OQ-13 fixes the catalog response as a complete top-level JSON array.
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
 
-OQ-12 may initially use the recommended starting position if upstream checksum metadata is not available. Capacity, availability, TLS, secrets and monitoring questions must be resolved before Phase 3.
+Capacity, availability, TLS, secrets and monitoring questions must be resolved before Phase 3.
 
 ## 7. Initial repository layout
 
