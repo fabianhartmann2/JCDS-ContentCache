@@ -7,6 +7,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repository_root}/deploy/contract-capture/compose.yaml"
 project_name="jcds-contract-capture-$$"
 report_file="$(mktemp "${TMPDIR:-/tmp}/jcds-contract-report.XXXXXX")"
+mounted_ca_file=""
 
 compose() {
   docker compose \
@@ -19,6 +20,9 @@ compose() {
 cleanup() {
   compose down --remove-orphans >/dev/null 2>&1 || true
   rm -f -- "${report_file}"
+  if [[ -n "${mounted_ca_file}" ]]; then
+    rm -f -- "${mounted_ca_file}"
+  fi
 }
 trap cleanup EXIT
 
@@ -91,6 +95,12 @@ prompt_value JAMF_CLIENT_SECRET "Read-only Jamf API client secret" true
 prompt_value CAPTURE_PACKAGE_NAME "Existing flat .pkg filename"
 prompt_optional_ca_file
 
+if [[ -n "${CAPTURE_CA_CERT_FILE:-}" ]]; then
+  mounted_ca_file="$(mktemp "${TMPDIR:-/tmp}/jcds-capture-ca.XXXXXX")"
+  cp "${CAPTURE_CA_CERT_FILE}" "${mounted_ca_file}"
+  chmod 0444 "${mounted_ca_file}"
+fi
+
 JAMF_BASE_URL="${JAMF_BASE_URL%/}"
 if [[ "${JAMF_BASE_URL}" != https://* ]]; then
   echo "JAMF_BASE_URL must use HTTPS." >&2
@@ -108,7 +118,7 @@ run_options=(run --rm --no-deps -T)
 if [[ -n "${CAPTURE_CA_CERT_FILE:-}" ]]; then
   run_options+=(
     --env CAPTURE_CA_CERT_FILE=/run/secrets/enterprise-ca.pem
-    --volume "${CAPTURE_CA_CERT_FILE}:/run/secrets/enterprise-ca.pem:ro"
+    --volume "${mounted_ca_file}:/run/secrets/enterprise-ca.pem:ro"
   )
 fi
 run_options+=(contract-capture)

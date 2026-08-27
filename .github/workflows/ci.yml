@@ -44,6 +44,7 @@ jobs:
           docker run --rm jcds-contract-capture:ci /bin/sh -c 'test -s /etc/ssl/certs/ca-certificates.crt'
           capture_ca="$(mktemp)"
           printf '%s\n' '-----BEGIN CERTIFICATE-----' 'synthetic-ca-marker' '-----END CERTIFICATE-----' >"${capture_ca}"
+          chmod 0444 "${capture_ca}"
           docker run --rm \
             --env CAPTURE_CA_CERT_FILE=/run/secrets/enterprise-ca.pem \
             --volume "${capture_ca}:/run/secrets/enterprise-ca.pem:ro" \

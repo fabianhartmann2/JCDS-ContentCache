@@ -99,7 +99,7 @@ The live validation performs one OAuth request, one catalog request, one resolve
 
 It does not contain the access token, client secret, tenant hostname, selected package name, package digests, signed URL, object path, query values, ETag or Last-Modified value. The report filename pattern is ignored by Git, but the report should still be reviewed before it is shared.
 
-If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only. Networks that inspect TLS must also provide the inspecting enterprise root or intermediate certificates as a PEM file at the optional prompt, or export its path as `CAPTURE_CA_CERT_FILE`. The file is mounted read-only for the one-shot run, combined in memory-backed temporary storage with the public CA bundle, and is never copied into the image or report.
+If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only. Networks that inspect TLS must also provide the inspecting enterprise root or intermediate certificates as a PEM file at the optional prompt, or export its path as `CAPTURE_CA_CERT_FILE`. The wrapper leaves the original untouched, creates a short-lived read-only copy for the non-root container, combines it in memory-backed temporary storage with the public CA bundle, and deletes the copy during cleanup. The CA is never copied into the image or report.
 
 The capture image performs no package-repository download during its final build stage. Its public CA bundle is copied from the pinned Go builder image, which avoids failures caused by TLS inspection of Alpine package repositories.
 
