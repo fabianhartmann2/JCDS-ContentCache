@@ -246,7 +246,7 @@ require_record(method="GET", range_kind="none", status=200, source="LOCAL", comp
 require_record(method="HEAD", range_kind="none", status=200, source="LOCAL", completion="complete")
 require_record(method="GET", range_kind="start_zero", status=206, source="LOCAL", response_range="present")
 require_record(method="GET", range_kind="resume", status=206, source="LOCAL", response_range="present")
-require_record(method="GET", range_kind="multi", status=206, source="LOCAL", response_range="present")
+require_record(method="GET", range_kind="multi", status=206, source="LOCAL", response_range="absent")
 require_record(method="GET", range_kind="none", status=502, source="", completion="complete")
 PY
 
