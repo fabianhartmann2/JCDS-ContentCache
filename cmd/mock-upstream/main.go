@@ -64,7 +64,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/oauth/token", service.handleToken)
+	mux.HandleFunc("POST /api/v1/oauth/token", service.handleToken)
 	mux.HandleFunc("GET /api/v1/jcds/files/{filename}", service.handleResolve)
 	mux.HandleFunc("GET /objects/{filename}", service.handleObject)
 	mux.HandleFunc("HEAD /objects/{filename}", service.handleObject)
@@ -142,7 +142,7 @@ func (s *mockService) handleResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"url": s.publicBase + "/objects/" + url.PathEscape(filename),
+		"uri": s.publicBase + "/objects/" + url.PathEscape(filename),
 	})
 }
 

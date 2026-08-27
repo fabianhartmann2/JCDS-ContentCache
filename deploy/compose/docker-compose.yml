@@ -46,11 +46,11 @@ services:
       LISTEN_ADDR: :8080
       STORE_ROOT: /srv/jamf-store/packages
       TEMP_ROOT: /srv/jamf-store/.temporary
-      JAMF_TOKEN_URL: http://mock-upstream:8081/api/oauth/token
+      JAMF_TOKEN_URL: http://mock-upstream:8081/api/v1/oauth/token
       JAMF_CLIENT_ID: mock-client
       JAMF_CLIENT_SECRET: mock-secret
       JAMF_RESOLVER_URL_TEMPLATE: http://mock-upstream:8081/api/v1/jcds/files/{filename}
-      JAMF_DOWNLOAD_URL_FIELD: url
+      JAMF_DOWNLOAD_URL_FIELD: uri
       JCDS_ALLOWED_HOSTS: mock-upstream
       JCDS_ALLOW_HTTP: "true"
       TOKEN_EXPIRY_SKEW: 30s
@@ -81,4 +81,3 @@ services:
 
 volumes:
   package-store:
-

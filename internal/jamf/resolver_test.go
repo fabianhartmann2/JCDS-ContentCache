@@ -51,12 +51,12 @@ func TestResolveRetriesOneUnauthorizedResponse(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": "https://download.example/object"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"uri": "https://download.example/object"})
 	}))
 	defer server.Close()
 
 	tokens := &fakeTokens{token: "token"}
-	resolver := NewClient(server.Client(), tokens, server.URL+"/{filename}", "url")
+	resolver := NewClient(server.Client(), tokens, server.URL+"/{filename}", "uri")
 	if _, err := resolver.Resolve(context.Background(), "ExampleFile.pkg"); err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}

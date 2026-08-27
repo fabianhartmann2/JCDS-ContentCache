@@ -20,9 +20,9 @@
 
 The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through a company-controlled HTTPS endpoint such as https://packages.example.ch:8443/packages/ExampleFile.pkg. The canonical request path maps directly to a human-readable local path such as /srv/jamf-store/packages/ExampleFile.pkg. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written to hidden temporary storage; only a complete validated transfer is atomically published under the final original filename.
 
-The service is deliberately split into two components. NGINX owns TLS termination, normalized filesystem lookup, static-file delivery, miss routing, downstream streaming, request controls and persistence through proxy_store or an equivalent atomic writer. A small purpose-built helper owns OAuth client-credentials authentication, Jamf API interaction, JSON parsing, signed-URL validation, upstream streaming and per-package single-flight coordination. This separation keeps lifecycle-sensitive Jamf API logic out of the web server configuration while preserving a simple local file layout.
+The service is deliberately split into two components. NGINX owns TLS termination, normalized filesystem lookup, static-file delivery, miss routing, downstream streaming and request controls. A small purpose-built helper owns OAuth client-credentials authentication, Jamf API interaction, JSON parsing, signed-URL validation, upstream streaming, temporary-file management, atomic publication and per-package single-flight coordination. This separation keeps lifecycle-sensitive Jamf API logic out of the web server configuration while preserving a simple local file layout.
 
-> **Important dependency:** Jamf currently describes GET /api/v1/jcds/files/{fileName} as a deprecated endpoint that returns a download URL. The implementation must confirm the supported replacement in the target Jamf Pro tenant and isolate Jamf-specific calls behind an adapter interface.
+> **Important dependency:** Jamf currently describes GET /api/v1/jcds/files/{fileName} as a deprecated endpoint. A sanitized tenant sample confirms that it returns the signed download URL in the JSON field `uri`. The implementation must confirm the supported replacement in the target Jamf Pro tenant and isolate Jamf-specific calls behind an adapter interface.
 
 ## 2. Business context and problem statement
 
@@ -252,7 +252,7 @@ The helper must cache the access token in memory, honor the returned expiration 
 
 ### FR-007 Jamf package resolution
 
-For a store miss, the helper must call the supported Jamf API with the requested filename and Bearer token, require a successful JSON response and extract exactly one download URL using a versioned response adapter.
+For a store miss, the helper must call the supported Jamf API with the requested filename and Bearer token, require a successful JSON response and extract exactly one download URL using a versioned response adapter. The observed deprecated v1 contract uses the JSON field `uri`; the field must remain configurable for a future replacement contract.
 
 > **Priority: Must. Acceptance:** Valid, not-found, malformed, unauthorized and deprecated-endpoint responses map to documented outcomes.
 
@@ -652,10 +652,11 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 The following items are intentionally explicit. Recommended defaults permit detailed design to proceed, but the stated decision deadline shows when confirmation becomes mandatory.
 
-#### OQ-01 — Jamf API contract (OPEN)
+#### OQ-01 — Jamf API contract (IN REVIEW)
 
-- **Decision required:** Which non-deprecated endpoint and exact JSON field return the JCDS download URL in the target tenant?
-- **Recommended default:** Validate the tenant's `/api/doc` and capture a redacted successful JSON response before implementation.
+- **Observed evidence:** The deprecated `GET /api/v1/jcds/files/{fileName}` endpoint returned a successful JSON object whose signed download URL is in `uri`.
+- **Decision still required:** Which supported replacement endpoint and response field supersede this contract in the target tenant?
+- **Recommended default:** Keep the observed contract behind the configurable adapter, validate the tenant's `/api/doc`, and capture sanitized error responses before architecture sign-off.
 - **Required by:** Architecture sign-off
 
 #### OQ-02 — Client access control (OPEN)
@@ -682,10 +683,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Capture requests from the real client. On a miss, retrieve and publish the complete object; determine whether the requesting client may receive a full 200 response or must wait for a correct 206 response from the completed file.
 - **Required by:** Implementation design
 
-#### OQ-06 — JCDS destination policy (OPEN)
+#### OQ-06 — JCDS destination policy (IN REVIEW)
 
-- **Decision required:** Which hostnames and redirect patterns can legitimate temporary download URLs use?
-- **Recommended default:** Derive an allowlist from Jamf documentation and redacted production samples; revalidate each redirect and reject non-HTTPS/private destinations.
+- **Observed evidence:** One sanitized resolver response used an HTTPS AWS CloudFront signed URL with time-limited signature query parameters.
+- **Decision still required:** Which exact CloudFront hostnames and redirect patterns can legitimate temporary URLs use across the tenant's package inventory?
+- **Recommended default:** Configure exact observed hostnames at deployment time, collect more sanitized samples, revalidate each redirect and reject wildcard CloudFront, non-HTTPS and private destinations.
 - **Required by:** Security design
 
 #### OQ-07 — Store retention and size (OPEN)

@@ -54,9 +54,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 - [ ] Create a dedicated read-only Jamf API client for development.
 - [ ] Confirm the supported file-resolution endpoint in the target tenant's `/api/doc`.
-- [ ] Capture a redacted successful file-resolution JSON response.
+- [x] Capture a redacted successful file-resolution JSON response.
 - [ ] Capture redacted not-found, unauthorized, rate-limit and server-error responses.
-- [ ] Record the precise field containing the temporary download URL.
+- [x] Record the precise field containing the temporary download URL (`uri`).
 - [ ] Record OAuth token response fields, expiry behavior and relevant error responses.
 - [ ] Identify approved JCDS hostnames and every permitted redirect destination.
 - [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, checksums and range support.
@@ -177,9 +177,9 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 
 | ID | Decision | Priority | Current status | Recommended starting position | Evidence needed |
 |---|---|---:|---|---|---|
-| OQ-01 | Exact supported Jamf file-resolution API contract | Blocking | OPEN | Use the target tenant's `/api/doc`; isolate it behind an adapter | Redacted success and error responses, endpoint/version confirmation |
+| OQ-01 | Exact supported Jamf file-resolution API contract | Blocking | IN REVIEW | Observed deprecated `GET /api/v1/jcds/files/{fileName}` returns the signed URL in `uri`; keep it behind an adapter | Tenant `/api/doc` replacement/version confirmation plus redacted error responses |
 | OQ-05 | Client and upstream range-request behavior | Blocking | OPEN | Capture real client traffic; on a miss fetch and publish the full object | `GET`, `HEAD`, resume and multi-range captures; JCDS response behavior |
-| OQ-06 | Permitted JCDS hosts and redirects | Blocking | OPEN | Explicit HTTPS hostname allowlist; revalidate each redirect | Production host/redirect inventory from tenant behavior and Jamf documentation |
+| OQ-06 | Permitted JCDS hosts and redirects | Blocking | IN REVIEW | One exact CloudFront distribution class is observed; allow exact configured hostnames only and revalidate redirects | Additional production samples and redirect behavior; approved runtime hostname inventory |
 | OQ-11 | Flat filenames or nested paths | Blocking | OPEN | V1 accepts one filename segment ending in `.pkg` | Required package naming examples and collision analysis |
 | OQ-12 | Integrity source of truth | High | OPEN | Require complete transfer and valid package signatures initially; use upstream checksum when available | JCDS metadata/header inventory and enterprise validation policy |
 | OQ-03 | Package workload and concurrency | High | OPEN | Measure before fixing performance limits | Package count/size distribution, peak clients, common simultaneous requests |

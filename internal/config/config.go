@@ -38,7 +38,7 @@ func Load() (Config, error) {
 		ClientID:            strings.TrimSpace(os.Getenv("JAMF_CLIENT_ID")),
 		ClientSecret:        os.Getenv("JAMF_CLIENT_SECRET"),
 		ResolverURLTemplate: strings.TrimSpace(os.Getenv("JAMF_RESOLVER_URL_TEMPLATE")),
-		DownloadURLField:    envOrDefault("JAMF_DOWNLOAD_URL_FIELD", "url"),
+		DownloadURLField:    envOrDefault("JAMF_DOWNLOAD_URL_FIELD", "uri"),
 	}
 
 	var err error

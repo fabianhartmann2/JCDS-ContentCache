@@ -11,11 +11,11 @@ func validConfig() Config {
 		ListenAddress:        ":8080",
 		StoreRoot:            "/srv/jamf-store/packages",
 		TempRoot:             "/srv/jamf-store/.temporary",
-		TokenURL:             "https://tenant.example/api/oauth/token",
+		TokenURL:             "https://tenant.example/api/v1/oauth/token",
 		ClientID:             "client-id",
 		ClientSecret:         "client-secret",
 		ResolverURLTemplate:  "https://tenant.example/api/files/{filename}",
-		DownloadURLField:     "url",
+		DownloadURLField:     "uri",
 		AllowedDownloadHosts: []string{"download.example"},
 		TokenExpirySkew:      time.Minute,
 		FillTimeout:          time.Hour,
@@ -32,7 +32,7 @@ func TestValidateAcceptsCompleteConfig(t *testing.T) {
 
 func TestValidateRejectsHTTPByDefault(t *testing.T) {
 	cfg := validConfig()
-	cfg.TokenURL = "http://tenant.example/api/oauth/token"
+	cfg.TokenURL = "http://tenant.example/api/v1/oauth/token"
 
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "must use HTTPS") {
