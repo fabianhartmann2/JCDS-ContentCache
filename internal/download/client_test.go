@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,12 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestPolicyRejectsUnlistedHost(t *testing.T) {
 	policy := NewPolicy([]string{"download.example"}, false)
@@ -89,5 +96,33 @@ func TestClientRejectsRedirectToUnlistedHostBeforeRequest(t *testing.T) {
 	}
 	if got := targetCalls.Load(); got != 0 {
 		t.Fatalf("redirect target calls = %d, want 0", got)
+	}
+}
+
+func TestPolicyParseErrorDoesNotExposeSignedQuery(t *testing.T) {
+	policy := NewPolicy([]string{"download.example"}, false)
+	_, err := policy.Validate("https://download.example/%zz?signed-query-marker=private-query-marker")
+	if !errors.Is(err, ErrPolicyViolation) {
+		t.Fatalf("Validate() error = %v, want ErrPolicyViolation", err)
+	}
+	if strings.Contains(err.Error(), "private-query-marker") {
+		t.Fatalf("Validate() error exposed the signed query: %v", err)
+	}
+}
+
+func TestClientRedactsSignedURLFromTransportError(t *testing.T) {
+	baseClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	client := NewClient(baseClient, NewPolicy([]string{"download.example"}, false), 1024)
+	_, err := client.Open(
+		context.Background(),
+		"https://download.example/object?signed-query-marker=private-query-marker",
+	)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Open() error = %v, want ErrUnavailable", err)
+	}
+	if strings.Contains(err.Error(), "private-query-marker") {
+		t.Fatalf("Open() error exposed the signed URL: %v", err)
 	}
 }

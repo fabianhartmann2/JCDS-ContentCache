@@ -26,6 +26,8 @@ Milestone M1 demonstrates the complete local lifecycle without credentials:
 9. Truncated or digest-mismatched transfers are discarded rather than published.
 10. Completed packages survive helper and NGINX container restarts.
 11. A range request on a miss retrieves the complete object; local hits support normal `206 Partial Content` delivery.
+12. Local packages remain available during a simulated Jamf/JCDS outage, while a missing package receives a controlled `502` response.
+13. OAuth, Jamf API, redirect, and object failures are categorized without returning dependency bodies or logging complete request URLs.
 
 The v1 prototype accepts one filename segment ending in `.pkg`. This is a provisional implementation of open question OQ-11, not yet a final production decision.
 
@@ -75,7 +77,7 @@ Run the deployed-path smoke test separately with Docker:
 tests/integration/compose_smoke.sh
 ```
 
-It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms the completed package is still served locally.
+It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms that the completed package remains locally available after restart and during an upstream outage.
 
 ## Repository map
 
@@ -104,6 +106,7 @@ docs/                   Requirements, execution plan and contract evidence
 - Never commit Jamf client credentials, OAuth tokens, temporary signed URLs, or unsanitized API responses.
 - The helper accepts only a validated package filename and never accepts a client-supplied upstream URL.
 - Every resolved URL and redirect is checked against the configured hostname allowlist.
+- Dependency response bodies and complete request URLs are excluded from propagated errors so temporary signed queries cannot enter normal logs.
 - Jamf catalog length and SHA3-512 metadata are verified before a downloaded file is published.
 - MD5 is parsed for interoperability but is not used as the security integrity boundary.
 - NGINX receives read-only access to completed package storage; the helper owns publication.

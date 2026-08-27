@@ -6,9 +6,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 type fakeTokens struct {
 	token         string
@@ -84,5 +91,65 @@ func TestResolveRetriesOneUnauthorizedResponse(t *testing.T) {
 	}
 	if got := tokens.invalidations.Load(); got != 1 {
 		t.Fatalf("token invalidations = %d, want 1", got)
+	}
+}
+
+func TestResolveMapsDependencyStatusesWithoutReturningResponseBodies(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		wantError    error
+		wantRequests int64
+	}{
+		{name: "unauthorized after retry", status: http.StatusUnauthorized, wantError: ErrUnauthorized, wantRequests: 2},
+		{name: "forbidden", status: http.StatusForbidden, wantError: ErrForbidden, wantRequests: 1},
+		{name: "throttled", status: http.StatusTooManyRequests, wantError: ErrThrottled, wantRequests: 1},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout, wantError: ErrTimeout, wantRequests: 1},
+		{name: "server failure", status: http.StatusInternalServerError, wantError: ErrUnavailable, wantRequests: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte("private-resolver-error-marker"))
+			}))
+			defer server.Close()
+
+			tokens := &fakeTokens{token: "token"}
+			resolver := NewClient(server.Client(), tokens, server.URL+"/{filename}", "uri")
+			_, err := resolver.Resolve(context.Background(), "ExampleFile.pkg")
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("Resolve() error = %v, want %v", err, test.wantError)
+			}
+			if strings.Contains(err.Error(), "private-resolver-error-marker") {
+				t.Fatalf("Resolve() error exposed the resolver response body: %v", err)
+			}
+			if got := requests.Load(); got != test.wantRequests {
+				t.Fatalf("resolver requests = %d, want %d", got, test.wantRequests)
+			}
+		})
+	}
+}
+
+func TestResolveRedactsRequestURLFromTransportError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	resolver := NewClient(
+		client,
+		&fakeTokens{token: "token"},
+		"https://tenant.example.invalid/api/{filename}?private-query-marker=redacted",
+		"uri",
+	)
+
+	_, err := resolver.Resolve(context.Background(), "ExampleFile.pkg")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Resolve() error = %v, want ErrUnavailable", err)
+	}
+	if strings.Contains(err.Error(), "private-query-marker") {
+		t.Fatalf("Resolve() error exposed the resolver URL: %v", err)
 	}
 }

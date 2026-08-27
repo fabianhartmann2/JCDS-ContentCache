@@ -13,6 +13,7 @@ Do not add credentials, access tokens, cookies, signed query parameters, tenant-
 - Successful response fields:
 - Expiry behavior:
 - Error status and body shapes:
+- Provisional adapter behavior while the exact error bodies remain unknown: classify by HTTP status, discard the bounded response body, and never propagate it or the complete token URL into a client response or normal error log.
 
 ## Jamf file-resolution contract
 
@@ -27,6 +28,7 @@ Do not add credentials, access tokens, cookies, signed query parameters, tenant-
 - Unauthorized response:
 - Throttle response:
 - Server-error response:
+- Provisional adapter behavior while these bodies remain unknown: classify by HTTP status, drain and discard the bounded body, retry exactly once only for `401`, and never propagate the body or complete resolver URL into a client response or normal error log.
 
 ### Sanitized successful response
 
@@ -60,6 +62,7 @@ The resolver response contains only the signed URL. Object integrity metadata is
 - MD5 policy: Retain for diagnostics/interoperability only; do not use MD5 as the security integrity boundary.
 - Top-level shape: The complete observed response begins with `[` and is a JSON array of file entries. No pagination envelope or page metadata is present in the observed contract.
 - Defensive behavior: The adapter accepts the observed complete array and fails explicitly if a future response uses an incomplete paginated envelope rather than returning a false not-found result.
+- Error behavior: Status-driven categories and the same bounded body/URL redaction rules are implemented; exact unauthorized, throttle, and server-error bodies remain to be captured from the tenant.
 
 ### Sanitized metadata fragment
 

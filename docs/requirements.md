@@ -4,7 +4,7 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.3
+**Version:** 0.4
 
 **Date:** 27 August 2026
 
@@ -645,7 +645,9 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 ### 14.2 Current M1 automated evidence
 
-The mock-driven milestone currently provides automated evidence for AT-01 through AT-05, the unsafe-redirect portion of AT-10, the truncation/length/digest portion of AT-11, the provisional miss/local-range portion of AT-12, and serving-container persistence from AT-14. The Docker Compose smoke test covers the deployed NGINX/helper path and verifies that upstream request counters remain unchanged for a repeated local hit, a local range request and a request after serving-container restart.
+The mock-driven milestone currently provides automated evidence for AT-01 through AT-05, the unsafe-redirect portion of AT-10, the truncation/length/digest portion of AT-11, the provisional miss/local-range portion of AT-12, serving-container persistence from AT-14, and dependency-independent local delivery from AT-15. The Docker Compose smoke test covers the deployed NGINX/helper path and verifies that upstream request counters remain unchanged for a repeated local hit, a local range request and a request after serving-container restart. It then stops the mock upstream, confirms the completed package remains locally available and verifies that an absent package receives a controlled error without creating a final file.
+
+The helper also has automated status and redaction coverage for OAuth rejection/throttling/timeouts, Jamf `401` single-retry behavior, `403`, `429`, `5xx`, malformed responses, unsafe redirects and object failures. Client responses and diagnostic categories are tested independently from dependency response bodies, and transport failures are sanitized before a complete request URL could reach normal logs.
 
 This evidence does not close the production gates. Actual managed-Mac traffic is still required for AT-12, actual JCDS destination and redirect observations are required for AT-10, and host reboot plus in-progress restart cases remain for AT-14.
 
@@ -792,8 +794,10 @@ Resolve the remaining questions in this order because each answer constrains the
 |-------------------------------------|---------------------|-------------------------------------------------|-------------------------|
 | Invalid method/path/name            | 400/404/405         | Reject before helper                            | Sanitized client error  |
 | Package absent in Jamf              | 404                 | Do not create a final file                      | resolver_not_found      |
-| OAuth credentials rejected          | 502/503             | Retry only according to token policy            | jamf_auth_failed        |
+| OAuth credentials rejected          | 502                 | Do not retry until credentials/configuration change | jamf_auth_failed     |
+| Jamf API throttled                   | 503 + Retry-After   | Do not retry within the request                  | jamf_throttled          |
 | Jamf resolver timeout               | 504                 | Bounded retry only if approved                  | jamf_resolver_timeout   |
+| Jamf/JCDS unavailable or 5xx         | 502                 | Preserve local hits; fail an uncached request   | upstream_unavailable    |
 | Malformed resolver JSON             | 502                 | Do not follow URL                               | jamf_response_invalid   |
 | Catalog missing/duplicate/incomplete| 502/404 by condition | Do not resolve or download                     | jamf_catalog_invalid    |
 | Signed URL rejected                 | 502                 | Do not connect                                  | download_url_rejected   |

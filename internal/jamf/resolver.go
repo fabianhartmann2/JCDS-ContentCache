@@ -15,12 +15,6 @@ import (
 
 const maxResolverResponseBytes = 1024 * 1024
 
-var (
-	ErrNotFound     = errors.New("package not found")
-	ErrUnauthorized = errors.New("Jamf API unauthorized")
-	ErrThrottled    = errors.New("Jamf API throttled")
-)
-
 type Resolver interface {
 	Resolve(context.Context, string) (string, error)
 }
@@ -64,42 +58,35 @@ func (c *Client) resolveOnce(ctx context.Context, filename string) (string, erro
 	resolverURL := strings.Replace(c.urlTemplate, "{filename}", url.PathEscape(filename), 1)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolverURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create Jamf resolver request: %w", err)
+		return "", fmt.Errorf("%w: create Jamf resolver request", ErrUnavailable)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request Jamf package resolution: %w", err)
+		return "", requestFailure("Jamf package resolution", err)
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResolverResponseBytes))
-		return "", ErrUnauthorized
-	case http.StatusNotFound:
+	if resp.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResolverResponseBytes))
 		return "", ErrNotFound
-	case http.StatusTooManyRequests:
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResolverResponseBytes))
-		return "", ErrThrottled
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if statusErr := apiStatusFailure("Jamf resolver", resp.StatusCode); statusErr != nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResolverResponseBytes))
-		return "", fmt.Errorf("Jamf resolver returned HTTP %d", resp.StatusCode)
+		return "", statusErr
 	}
 
 	var payload map[string]any
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxResolverResponseBytes))
 	if err := decoder.Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode Jamf resolver response: %w", err)
+		return "", fmt.Errorf("%w: decode Jamf resolver response", ErrInvalidResponse)
 	}
 
 	downloadURL, err := stringField(payload, c.urlField)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 	return downloadURL, nil
 }

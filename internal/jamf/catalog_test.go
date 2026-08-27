@@ -100,3 +100,62 @@ func TestCatalogRejectsIncompletePaginatedEnvelope(t *testing.T) {
 		t.Fatalf("Lookup() error = %v, want pagination error", err)
 	}
 }
+
+func TestCatalogMapsDependencyStatusesWithoutReturningResponseBodies(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		wantError    error
+		wantRequests int64
+	}{
+		{name: "unauthorized after retry", status: http.StatusUnauthorized, wantError: ErrUnauthorized, wantRequests: 2},
+		{name: "forbidden", status: http.StatusForbidden, wantError: ErrForbidden, wantRequests: 1},
+		{name: "throttled", status: http.StatusTooManyRequests, wantError: ErrThrottled, wantRequests: 1},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout, wantError: ErrTimeout, wantRequests: 1},
+		{name: "server failure", status: http.StatusInternalServerError, wantError: ErrUnavailable, wantRequests: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte("private-catalog-error-marker"))
+			}))
+			defer server.Close()
+
+			tokens := &fakeTokens{token: "token"}
+			catalog := NewCatalogClient(server.Client(), tokens, server.URL)
+			_, err := catalog.Lookup(context.Background(), "ExampleFile.pkg")
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("Lookup() error = %v, want %v", err, test.wantError)
+			}
+			if strings.Contains(err.Error(), "private-catalog-error-marker") {
+				t.Fatalf("Lookup() error exposed the catalog response body: %v", err)
+			}
+			if got := requests.Load(); got != test.wantRequests {
+				t.Fatalf("catalog requests = %d, want %d", got, test.wantRequests)
+			}
+		})
+	}
+}
+
+func TestCatalogRedactsRequestURLFromTransportError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	catalog := NewCatalogClient(
+		client,
+		&fakeTokens{token: "token"},
+		"https://tenant.example.invalid/api/files?private-query-marker=redacted",
+	)
+
+	_, err := catalog.Lookup(context.Background(), "ExampleFile.pkg")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Lookup() error = %v, want ErrUnavailable", err)
+	}
+	if strings.Contains(err.Error(), "private-query-marker") {
+		t.Fatalf("Lookup() error exposed the catalog URL: %v", err)
+	}
+}

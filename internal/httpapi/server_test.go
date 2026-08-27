@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha3"
 	"encoding/hex"
@@ -12,11 +13,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/auth"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/download"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/jamf"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
@@ -24,21 +27,29 @@ import (
 
 type staticResolver struct {
 	url   string
+	err   error
 	calls atomic.Int64
 }
 
 func (r *staticResolver) Resolve(context.Context, string) (string, error) {
 	r.calls.Add(1)
+	if r.err != nil {
+		return "", r.err
+	}
 	return r.url, nil
 }
 
 type staticMetadata struct {
 	metadata jamf.FileMetadata
+	err      error
 	calls    atomic.Int64
 }
 
 func (m *staticMetadata) Lookup(context.Context, string) (jamf.FileMetadata, error) {
 	m.calls.Add(1)
+	if m.err != nil {
+		return jamf.FileMetadata{}, m.err
+	}
 	return m.metadata, nil
 }
 
@@ -447,5 +458,96 @@ func TestHeadMissDoesNotStartUpstreamFill(t *testing.T) {
 	}
 	if got := metadata.calls.Load(); got != 0 {
 		t.Fatalf("metadata calls = %d, want 0", got)
+	}
+}
+
+func TestDependencyErrorsHaveControlledStatusesAndDiagnosticCategories(t *testing.T) {
+	tests := []struct {
+		name           string
+		err            error
+		wantStatus     int
+		wantBody       string
+		wantRetryAfter string
+		wantCategory   string
+	}{
+		{
+			name:         "package absent",
+			err:          jamf.ErrNotFound,
+			wantStatus:   http.StatusNotFound,
+			wantBody:     "package not found\n",
+			wantCategory: "resolver_not_found",
+		},
+		{
+			name:         "OAuth credentials rejected",
+			err:          auth.ErrRejected,
+			wantStatus:   http.StatusBadGateway,
+			wantBody:     "package source is unavailable\n",
+			wantCategory: "jamf_auth_failed",
+		},
+		{
+			name:           "OAuth throttled",
+			err:            auth.ErrThrottled,
+			wantStatus:     http.StatusServiceUnavailable,
+			wantBody:       "package source is temporarily unavailable\n",
+			wantRetryAfter: "30",
+			wantCategory:   "jamf_throttled",
+		},
+		{
+			name:         "dependency timeout",
+			err:          jamf.ErrTimeout,
+			wantStatus:   http.StatusGatewayTimeout,
+			wantBody:     "package retrieval timed out\n",
+			wantCategory: "upstream_timeout",
+		},
+		{
+			name:         "invalid Jamf response",
+			err:          jamf.ErrInvalidResponse,
+			wantStatus:   http.StatusBadGateway,
+			wantBody:     "package source is unavailable\n",
+			wantCategory: "jamf_response_invalid",
+		},
+		{
+			name:         "upstream unavailable",
+			err:          jamf.ErrUnavailable,
+			wantStatus:   http.StatusBadGateway,
+			wantBody:     "package source is unavailable\n",
+			wantCategory: "upstream_unavailable",
+		},
+		{
+			name:         "download URL rejected",
+			err:          download.ErrPolicyViolation,
+			wantStatus:   http.StatusBadGateway,
+			wantBody:     "package retrieval failed\n",
+			wantCategory: "download_url_rejected",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			api, finalPath, _, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
+			metadata.err = test.err
+			var logs bytes.Buffer
+			api.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			request := httptest.NewRequest(http.MethodGet, "/packages/ExampleFile.pkg", nil)
+			response := httptest.NewRecorder()
+
+			api.Handler().ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+			if response.Body.String() != test.wantBody {
+				t.Fatalf("body = %q, want %q", response.Body.String(), test.wantBody)
+			}
+			if got := response.Header().Get("Retry-After"); got != test.wantRetryAfter {
+				t.Fatalf("Retry-After = %q, want %q", got, test.wantRetryAfter)
+			}
+			if !strings.Contains(logs.String(), `"category":"`+test.wantCategory+`"`) {
+				t.Fatalf("log = %q, want category %q", logs.String(), test.wantCategory)
+			}
+			if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
+				t.Fatalf("dependency failure published a final package, stat error = %v", err)
+			}
+		})
 	}
 }

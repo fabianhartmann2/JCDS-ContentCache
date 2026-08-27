@@ -1,7 +1,7 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
 **Status:** Active working plan  
-**Version:** 0.3  
+**Version:** 0.4  
 **Date:** 27 August 2026  
 **Owner:** Mac Workplace  
 **Target:** Production service on one managed Linux container host
@@ -119,7 +119,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Apply outbound DNS, host, port and redirect restrictions.
 - [ ] Deliver the Jamf client secret through the selected secret platform.
 - [ ] Ensure secrets, tokens and signed URLs are redacted from logs, metrics, traces and error responses.
-- [ ] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
+- [x] Sanitize dependency response bodies and complete request URLs before errors reach client responses or normal logs.
+- [x] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
 - [ ] Add bounded connect, header, read, idle and total-operation timeouts.
 - [ ] Add bounded retries with backoff only for safe transient operations.
 - [ ] Add maximum object size and minimum-free-space protections.
@@ -162,7 +163,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 - [ ] Execute all acceptance tests from the requirements specification.
 - [ ] Record evidence for every production acceptance gate.
-- [ ] Test local-hit service during a simulated Jamf/JCDS outage.
+- [x] Test local-hit service during a simulated Jamf/JCDS outage.
 - [ ] Test disk-low, disk-full, token expiry, redirect rejection, upstream timeout and process-restart scenarios.
 - [ ] Pilot with a small managed-client group.
 - [ ] Compare client success, latency, bandwidth savings and error rates against the baseline.
@@ -266,10 +267,11 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Repository | Confirmed public repository `fabianhartmann2/JCDS-ContentCache` and write access | Resolved |
 | 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
 | 2026-08-27 | Milestone M1 | Added automated deployed-path evidence for MISS-to-LOCAL delivery, local ranges, client-abort continuation, truncated-transfer cleanup and persistence across serving-container restarts | In review |
+| 2026-08-27 | Phase 2 resilience | Added typed OAuth/Jamf/object failure categories, URL/body redaction tests, controlled downstream mappings and local-hit availability during an upstream outage | In review |
 
 ## 10. Immediate next actions
 
-1. Capture sanitized unauthorized, throttled and server-error Jamf response shapes and add adapter/error-mapping tests.
+1. Capture sanitized unauthorized, throttled and server-error Jamf response shapes to validate the implemented status-driven, body-agnostic mappings against the real tenant.
 2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range traffic to resolve OQ-05.
 3. Confirm the production JCDS hostname inventory and whether real resolver URLs redirect, then resolve OQ-06.
 4. Decide whether v1 permanently uses one flat `.pkg` filename segment, resolving OQ-11.

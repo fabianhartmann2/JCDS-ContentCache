@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/auth"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/download"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/jamf"
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
@@ -241,24 +242,47 @@ func (s *Server) serveLocal(w http.ResponseWriter, r *http.Request, filename str
 func (s *Server) writeError(w http.ResponseWriter, filename string, err error) {
 	status := http.StatusBadGateway
 	message := "package retrieval failed"
+	category := "upstream_failure"
 
 	switch {
-	case errors.Is(err, jamf.ErrNotFound), errors.Is(err, download.ErrNotFound):
+	case errors.Is(err, jamf.ErrNotFound):
 		status = http.StatusNotFound
 		message = "package not found"
-	case errors.Is(err, jamf.ErrThrottled):
+		category = "resolver_not_found"
+	case errors.Is(err, download.ErrNotFound):
+		status = http.StatusNotFound
+		message = "package not found"
+		category = "jcds_not_found"
+	case errors.Is(err, auth.ErrRejected), errors.Is(err, jamf.ErrUnauthorized), errors.Is(err, jamf.ErrForbidden):
+		message = "package source is unavailable"
+		category = "jamf_auth_failed"
+	case errors.Is(err, auth.ErrThrottled), errors.Is(err, jamf.ErrThrottled):
 		status = http.StatusServiceUnavailable
 		message = "package source is temporarily unavailable"
+		category = "jamf_throttled"
 		w.Header().Set("Retry-After", "30")
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, auth.ErrTimeout), errors.Is(err, jamf.ErrTimeout), errors.Is(err, download.ErrTimeout):
 		status = http.StatusGatewayTimeout
 		message = "package retrieval timed out"
+		category = "upstream_timeout"
 	case errors.Is(err, context.Canceled):
 		status = http.StatusRequestTimeout
 		message = "package request was canceled"
+		category = "request_canceled"
+	case errors.Is(err, auth.ErrInvalidResponse):
+		message = "package source is unavailable"
+		category = "oauth_response_invalid"
+	case errors.Is(err, jamf.ErrInvalidResponse), errors.Is(err, jamf.ErrUnexpectedResponse):
+		message = "package source is unavailable"
+		category = "jamf_response_invalid"
+	case errors.Is(err, download.ErrPolicyViolation):
+		category = "download_url_rejected"
+	case errors.Is(err, auth.ErrUnavailable), errors.Is(err, jamf.ErrUnavailable), errors.Is(err, download.ErrUnavailable):
+		message = "package source is unavailable"
+		category = "upstream_unavailable"
 	}
 
-	s.logger.Error("package request failed", "filename", filename, "status", status, "error", err)
+	s.logger.Error("package request failed", "filename", filename, "status", status, "category", category, "error", err)
 	http.Error(w, message, status)
 }
 

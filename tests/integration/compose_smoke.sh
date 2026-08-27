@@ -108,4 +108,21 @@ assert_source_header "${temporary_directory}/restart.headers" LOCAL
 cmp "${fixture}" "${temporary_directory}/restart.pkg"
 [[ "$(mock_metrics)" == "${metrics_after_miss}" ]]
 
-echo "Compose smoke test passed: MISS -> LOCAL -> LOCAL after restart, with one upstream fill."
+compose stop mock-upstream
+
+curl --fail --silent --show-error \
+  --dump-header "${temporary_directory}/outage-local.headers" \
+  --output "${temporary_directory}/outage-local.pkg" \
+  http://127.0.0.1:8443/packages/ExampleFile.pkg
+assert_source_header "${temporary_directory}/outage-local.headers" LOCAL
+cmp "${fixture}" "${temporary_directory}/outage-local.pkg"
+
+outage_status="$(curl --silent --show-error \
+  --output "${temporary_directory}/outage-miss.body" \
+  --write-out '%{http_code}' \
+  http://127.0.0.1:8443/packages/Missing.pkg)"
+[[ "${outage_status}" == "502" ]]
+grep --fixed-strings --line-regexp --quiet "package source is unavailable" "${temporary_directory}/outage-miss.body"
+compose exec --no-TTY cache-helper test ! -e /srv/jamf-store/packages/Missing.pkg
+
+echo "Compose smoke test passed: one upstream fill, local range/restart persistence, and local delivery during an upstream outage."

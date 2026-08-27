@@ -3,13 +3,21 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestProviderReusesTokenAcrossConcurrentCalls(t *testing.T) {
 	var requests atomic.Int64
@@ -80,5 +88,59 @@ func TestProviderRefreshesAfterInvalidation(t *testing.T) {
 	}
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("token endpoint requests = %d, want 2", got)
+	}
+}
+
+func TestProviderMapsFailureStatusesWithoutReturningResponseBodies(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		wantError error
+	}{
+		{name: "credentials rejected", status: http.StatusUnauthorized, wantError: ErrRejected},
+		{name: "forbidden", status: http.StatusForbidden, wantError: ErrRejected},
+		{name: "throttled", status: http.StatusTooManyRequests, wantError: ErrThrottled},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout, wantError: ErrTimeout},
+		{name: "server failure", status: http.StatusInternalServerError, wantError: ErrUnavailable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte("private-oauth-error-marker"))
+			}))
+			defer server.Close()
+
+			provider := NewProvider(server.Client(), server.URL, "client", "secret", time.Minute)
+			_, err := provider.Token(context.Background())
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("Token() error = %v, want %v", err, test.wantError)
+			}
+			if strings.Contains(err.Error(), "private-oauth-error-marker") {
+				t.Fatalf("Token() error exposed the OAuth response body: %v", err)
+			}
+		})
+	}
+}
+
+func TestProviderRedactsTokenURLFromTransportError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	provider := NewProvider(
+		client,
+		"https://oauth.example.invalid/token?private-query-marker=redacted",
+		"client",
+		"secret",
+		time.Minute,
+	)
+
+	_, err := provider.Token(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Token() error = %v, want ErrUnavailable", err)
+	}
+	if strings.Contains(err.Error(), "private-query-marker") {
+		t.Fatalf("Token() error exposed the token URL: %v", err)
 	}
 }

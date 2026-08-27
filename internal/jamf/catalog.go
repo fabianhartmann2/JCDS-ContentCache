@@ -66,33 +66,25 @@ func (c *CatalogClient) lookupOnce(ctx context.Context, filename string) (FileMe
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.catalogURL, nil)
 	if err != nil {
-		return FileMetadata{}, fmt.Errorf("create Jamf catalog request: %w", err)
+		return FileMetadata{}, fmt.Errorf("%w: create Jamf catalog request", ErrUnavailable)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return FileMetadata{}, fmt.Errorf("request Jamf package catalog: %w", err)
+		return FileMetadata{}, requestFailure("Jamf package catalog", err)
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
+	if statusErr := apiStatusFailure("Jamf catalog", resp.StatusCode); statusErr != nil {
 		drainLimited(resp.Body, maxCatalogResponseBytes)
-		return FileMetadata{}, ErrUnauthorized
-	case http.StatusTooManyRequests:
-		drainLimited(resp.Body, maxCatalogResponseBytes)
-		return FileMetadata{}, ErrThrottled
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		drainLimited(resp.Body, maxCatalogResponseBytes)
-		return FileMetadata{}, fmt.Errorf("Jamf catalog returned HTTP %d", resp.StatusCode)
+		return FileMetadata{}, statusErr
 	}
 
 	entries, err := decodeCatalog(resp.Body)
 	if err != nil {
-		return FileMetadata{}, err
+		return FileMetadata{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 
 	var match *FileMetadata
@@ -101,7 +93,7 @@ func (c *CatalogClient) lookupOnce(ctx context.Context, filename string) (FileMe
 			continue
 		}
 		if match != nil {
-			return FileMetadata{}, fmt.Errorf("Jamf catalog contains duplicate entries for %q", filename)
+			return FileMetadata{}, fmt.Errorf("%w: Jamf catalog contains duplicate entries for %q", ErrInvalidResponse, filename)
 		}
 		match = &entries[index]
 	}
@@ -109,7 +101,7 @@ func (c *CatalogClient) lookupOnce(ctx context.Context, filename string) (FileMe
 		return FileMetadata{}, ErrNotFound
 	}
 	if err := validateMetadata(*match); err != nil {
-		return FileMetadata{}, fmt.Errorf("invalid Jamf metadata for %q: %w", filename, err)
+		return FileMetadata{}, fmt.Errorf("%w: invalid Jamf metadata for %q: %v", ErrInvalidResponse, filename, err)
 	}
 	return *match, nil
 }
