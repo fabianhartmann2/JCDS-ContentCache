@@ -56,5 +56,9 @@ jobs:
           bash -n scripts/check-certificate-expiry.sh
           bash -n tests/integration/production_config_smoke.sh
           tests/integration/production_config_smoke.sh
+      - name: Validate macOS real-backend profile
+        env:
+          JCDS_MAC_HELPER_ENV_FILE: ${{ github.workspace }}/deploy/macos/cache-helper.real.env.example
+        run: docker compose --file deploy/macos/compose.yaml config --quiet
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

@@ -80,6 +80,12 @@ tests/integration/compose_smoke.sh
 
 It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms that the completed package remains locally available after restart and during an upstream outage.
 
+## Real-backend test on macOS
+
+After the mock stack passes, Docker Desktop on a Mac can run a localhost-only integration profile against the real Jamf/JCDS backend. It uses a Docker-managed test volume, validates all upstream TLS connections, injects credentials from a private file outside Git, and publishes plain HTTP only on `127.0.0.1:8443`. It is an integration-test profile, not a production service or LAN listener.
+
+Follow [Real-backend test on macOS](docs/macos-real-backend-test.md). Never commit or share the completed environment file, tenant hostname, exact JCDS hostname, signed URL, token, secret, or unsanitized helper log.
+
 ## Production candidate
 
 The first host profile is Ubuntu Server 26.04 LTS on amd64, serving `jcds-cache.appfruit.ch:8443` to `192.168.0.0/16`. Completed packages and hidden temporary files live on one dedicated filesystem mounted at `/srv/jamf-store`. The production Compose definition runs the helper as UID/GID `65532`, gives NGINX read-only access to package storage, uses read-only container root filesystems, drops unnecessary capabilities, and does not publish the helper port.
@@ -144,6 +150,7 @@ internal/jamf/          Replaceable Jamf resolver and metadata-catalog adapters
 internal/store/         Temporary files, publication and single-flight locks
 deploy/compose/         Local development stack
 deploy/contract-capture/ Hardened one-shot live validation image
+deploy/macos/           Localhost-only real-backend Docker Desktop test
 deploy/nginx/           Development and production NGINX templates
 deploy/production/      Hardened single-host production-candidate stack
 docs/                   Requirements, execution plan and contract evidence
@@ -155,6 +162,7 @@ docs/                   Requirements, execution plan and contract evidence
 - [Project execution plan](docs/execution-plan.md)
 - [External-contract evidence template](docs/external-contracts.md)
 - [Client request monitoring](docs/client-request-monitoring.md)
+- [Real-backend test on macOS](docs/macos-real-backend-test.md)
 - [Production-candidate deployment](docs/production-deployment.md)
 
 ## Security notes

@@ -1,0 +1,117 @@
+name: jcds-content-cache-real-macos
+
+services:
+  store-init:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary
+        chmod 0755 /srv/jamf-store /srv/jamf-store/packages
+        chmod 0700 /srv/jamf-store/.temporary
+        chown -R 65532:65532 /srv/jamf-store
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    volumes:
+      - package-store:/srv/jamf-store
+    restart: "no"
+
+  cache-helper:
+    image: jcds-content-cache:macos-real-test
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: cache-helper
+    depends_on:
+      store-init:
+        condition: service_completed_successfully
+    env_file:
+      - ${JCDS_MAC_HELPER_ENV_FILE:?Set JCDS_MAC_HELPER_ENV_FILE to the absolute path of the private helper environment file}
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
+    stop_grace_period: 2m
+    restart: unless-stopped
+    volumes:
+      - package-store:/srv/jamf-store
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    depends_on:
+      cache-helper:
+        condition: service_healthy
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    pids_limit: 256
+    mem_limit: 512m
+    restart: unless-stopped
+    ports:
+      - "${JCDS_MAC_LISTEN_IP:-127.0.0.1}:${JCDS_MAC_LISTEN_PORT:-8443}:8080/tcp"
+    volumes:
+      - type: bind
+        source: ../nginx/nginx.dev.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: volume
+        source: package-store
+        target: /srv/jamf-store
+        read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  package-store:

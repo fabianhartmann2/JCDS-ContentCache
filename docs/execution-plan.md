@@ -160,6 +160,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
 - [ ] Add backup/rebuild expectations and a tested disaster-recovery procedure.
 - [ ] Run a real-tenant smoke test with approved non-sensitive packages.
+- [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
 - [ ] Measure throughput, time to first byte, CPU, memory, disk I/O and WAN usage.
 - [ ] Tune timeouts and concurrency using measured package sizes and client demand.
 - [ ] Complete security, infrastructure and service-owner reviews.
