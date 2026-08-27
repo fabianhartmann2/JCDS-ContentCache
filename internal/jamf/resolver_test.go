@@ -67,4 +67,3 @@ func TestResolveRetriesOneUnauthorizedResponse(t *testing.T) {
 		t.Fatalf("token invalidations = %d, want 1", got)
 	}
 }
-

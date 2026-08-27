@@ -306,4 +306,3 @@ func (w *trackingResponseWriter) Flush() {
 		flusher.Flush()
 	}
 }
-

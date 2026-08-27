@@ -140,4 +140,3 @@ func (p *Provider) fetch(ctx context.Context) (string, time.Time, error) {
 
 	return payload.AccessToken, p.now().Add(time.Duration(expiresIn) * time.Second), nil
 }
-

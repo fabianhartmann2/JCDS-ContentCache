@@ -16,9 +16,9 @@ import (
 const maxResolverResponseBytes = 1024 * 1024
 
 var (
-	ErrNotFound    = errors.New("package not found")
+	ErrNotFound     = errors.New("package not found")
 	ErrUnauthorized = errors.New("Jamf API unauthorized")
-	ErrThrottled   = errors.New("Jamf API throttled")
+	ErrThrottled    = errors.New("Jamf API throttled")
 )
 
 type Resolver interface {
@@ -122,4 +122,3 @@ func stringField(payload map[string]any, fieldPath string) (string, error) {
 	}
 	return value, nil
 }
-

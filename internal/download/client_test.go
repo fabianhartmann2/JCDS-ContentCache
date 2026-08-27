@@ -22,4 +22,3 @@ func TestPolicyDoesNotAllowSubdomainSuffixMatch(t *testing.T) {
 		t.Fatal("Validate() accepted a suffix-based hostname match")
 	}
 }
-

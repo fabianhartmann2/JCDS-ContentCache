@@ -111,4 +111,3 @@ func (c *Client) Open(ctx context.Context, rawURL string) (*http.Response, error
 	}
 	return resp, nil
 }
-

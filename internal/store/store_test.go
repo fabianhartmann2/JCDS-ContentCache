@@ -10,13 +10,13 @@ import (
 
 func TestValidateFilename(t *testing.T) {
 	tests := map[string]bool{
-		"ExampleFile.pkg":            true,
+		"ExampleFile.pkg":              true,
 		"Microsoft Office (16.99).pkg": true,
-		"../secret.pkg":              false,
-		"folder/file.pkg":            false,
-		"https:evil.pkg":             false,
-		"example.dmg":                false,
-		".hidden.pkg":                false,
+		"../secret.pkg":                false,
+		"folder/file.pkg":              false,
+		"https:evil.pkg":               false,
+		"example.dmg":                  false,
+		".hidden.pkg":                  false,
 	}
 	for filename, wantValid := range tests {
 		t.Run(filename, func(t *testing.T) {
@@ -90,4 +90,3 @@ func TestAbortDoesNotPublishFile(t *testing.T) {
 		t.Fatalf("Open() error = %v, want ErrNotFound", err)
 	}
 }
-

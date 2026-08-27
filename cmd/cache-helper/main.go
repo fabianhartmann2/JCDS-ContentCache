@@ -119,4 +119,3 @@ func newTransport() *http.Transport {
 		ExpectContinueTimeout: time.Second,
 	}
 }
-

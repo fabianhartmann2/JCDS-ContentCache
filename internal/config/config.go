@@ -13,20 +13,20 @@ import (
 const resolverFilenamePlaceholder = "{filename}"
 
 type Config struct {
-	ListenAddress       string
-	StoreRoot           string
-	TempRoot            string
-	TokenURL            string
-	ClientID            string
-	ClientSecret        string
-	ResolverURLTemplate string
-	DownloadURLField    string
+	ListenAddress        string
+	StoreRoot            string
+	TempRoot             string
+	TokenURL             string
+	ClientID             string
+	ClientSecret         string
+	ResolverURLTemplate  string
+	DownloadURLField     string
 	AllowedDownloadHosts []string
-	AllowHTTP           bool
-	TokenExpirySkew     time.Duration
-	FillTimeout         time.Duration
-	ShutdownTimeout     time.Duration
-	MaxPackageBytes     int64
+	AllowHTTP            bool
+	TokenExpirySkew      time.Duration
+	FillTimeout          time.Duration
+	ShutdownTimeout      time.Duration
+	MaxPackageBytes      int64
 }
 
 func Load() (Config, error) {
@@ -201,4 +201,3 @@ func validateServiceURL(name, rawURL string, allowHTTP bool) error {
 	}
 	return nil
 }
-

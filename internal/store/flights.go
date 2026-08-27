@@ -58,4 +58,3 @@ func (h *FlightHandle) Finish(err error) {
 	delete(h.parent.entries, h.key)
 	close(h.flight.done)
 }
-

@@ -82,4 +82,3 @@ func TestProviderRefreshesAfterInvalidation(t *testing.T) {
 		t.Fatalf("token endpoint requests = %d, want 2", got)
 	}
 }
-

@@ -167,4 +167,3 @@ func TestInvalidPackagePathDoesNotCallResolver(t *testing.T) {
 		t.Fatalf("resolver calls = %d, want 0", got)
 	}
 }
-

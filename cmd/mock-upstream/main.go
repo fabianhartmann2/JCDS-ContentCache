@@ -23,16 +23,16 @@ import (
 )
 
 type mockService struct {
-	logger      *slog.Logger
-	publicBase  string
-	fixtureRoot string
-	clientID    string
+	logger       *slog.Logger
+	publicBase   string
+	fixtureRoot  string
+	clientID     string
 	clientSecret string
-	chunkDelay  time.Duration
-	chunkSize   int
-	tokenCalls  atomic.Int64
+	chunkDelay   time.Duration
+	chunkSize    int
+	tokenCalls   atomic.Int64
 	resolveCalls atomic.Int64
-	objectCalls atomic.Int64
+	objectCalls  atomic.Int64
 }
 
 func main() {
@@ -222,4 +222,3 @@ func envOrDefault(name, fallback string) string {
 	}
 	return fallback
 }
-

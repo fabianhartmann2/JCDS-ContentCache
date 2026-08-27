@@ -232,4 +232,3 @@ func syncDirectory(path string) error {
 	defer directory.Close()
 	return directory.Sync()
 }
-

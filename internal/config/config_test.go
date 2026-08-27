@@ -8,19 +8,19 @@ import (
 
 func validConfig() Config {
 	return Config{
-		ListenAddress:         ":8080",
-		StoreRoot:             "/srv/jamf-store/packages",
-		TempRoot:              "/srv/jamf-store/.temporary",
-		TokenURL:              "https://tenant.example/api/oauth/token",
-		ClientID:              "client-id",
-		ClientSecret:          "client-secret",
-		ResolverURLTemplate:   "https://tenant.example/api/files/{filename}",
-		DownloadURLField:      "url",
+		ListenAddress:        ":8080",
+		StoreRoot:            "/srv/jamf-store/packages",
+		TempRoot:             "/srv/jamf-store/.temporary",
+		TokenURL:             "https://tenant.example/api/oauth/token",
+		ClientID:             "client-id",
+		ClientSecret:         "client-secret",
+		ResolverURLTemplate:  "https://tenant.example/api/files/{filename}",
+		DownloadURLField:     "url",
 		AllowedDownloadHosts: []string{"download.example"},
-		TokenExpirySkew:       time.Minute,
-		FillTimeout:           time.Hour,
-		ShutdownTimeout:       time.Minute,
-		MaxPackageBytes:       1024,
+		TokenExpirySkew:      time.Minute,
+		FillTimeout:          time.Hour,
+		ShutdownTimeout:      time.Minute,
+		MaxPackageBytes:      1024,
 	}
 }
 
@@ -49,4 +49,3 @@ func TestValidateRequiresOneResolverPlaceholder(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want placeholder error", err)
 	}
 }
-
