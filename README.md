@@ -81,20 +81,27 @@ It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated 
 
 ## Sanitized live-contract capture
 
-After a dedicated read-only Jamf API client is available, an administrator can validate the live success contracts without printing the access token, client secret, tenant hostname, package name, package size, hashes, signed URL, object path or query values:
+After a dedicated read-only Jamf API client is available, run the Docker wrapper from an interactive terminal:
 
 ```bash
-export JAMF_TOKEN_URL="https://<tenant-host>/api/v1/oauth/token"
-export JAMF_CLIENT_ID="<client-id>"
-export JAMF_CLIENT_SECRET="<client-secret>"
-export JAMF_CATALOG_URL="https://<tenant-host>/api/v1/jcds/files"
-export JAMF_RESOLVER_URL_TEMPLATE="https://<tenant-host>/api/v1/jcds/files/{filename}"
-export CAPTURE_PACKAGE_NAME="<existing-flat-package-name>.pkg"
-
-go run ./cmd/contract-capture > sanitized-contract-report.json
+./scripts/capture-live-contracts.sh > sanitized-contract-report.json
 ```
 
-Run this locally; do not commit the environment values or raw API responses. The generated report contains only JSON field types, expiry seconds, metadata-presence checks, digest lengths and a truncated SHA-256 hostname fingerprint for comparing destination stability.
+The wrapper prompts for the Jamf base URL, read-only API client ID, hidden client secret, and one existing flat `.pkg` filename. It builds an unprivileged one-shot image, runs with a read-only root filesystem and all Linux capabilities dropped, removes the container afterward, and applies a final disclosure guard before printing the report. Values entered at the prompts are not placed in shell history or written to the report. Like any Docker environment value, they remain inspectable by a local Docker administrator while the short-lived container is running.
+
+The live validation performs one OAuth request, one catalog request, one resolver request, one object `HEAD`, and one `GET` with `Range: bytes=0-0`. If the object endpoint ignores the range and returns `200`, the client closes the body immediately rather than intentionally downloading the complete package. The generated JSON contains only:
+
+- OAuth field types, token type and lifetime
+- JCDS file count and aggregate v1 `.pkg` count, total bytes and largest bytes
+- metadata-presence and digest-length checks for the selected package
+- truncated SHA-256 hostname fingerprints, query-parameter count and redirect observations
+- status and capability observations for `HEAD` and the one-byte range probe
+
+It does not contain the access token, client secret, tenant hostname, selected package name, package digests, signed URL, object path, query values, ETag or Last-Modified value. The report filename pattern is ignored by Git, but the report should still be reviewed before it is shared.
+
+If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only.
+
+Developers with Go 1.24 may run `go run ./cmd/contract-capture` directly after exporting the six environment variables shown in `deploy/contract-capture/compose.yaml`.
 
 ## Repository map
 
@@ -109,6 +116,7 @@ internal/httpapi/       Health and package request handlers
 internal/jamf/          Replaceable Jamf resolver and metadata-catalog adapters
 internal/store/         Temporary files, publication and single-flight locks
 deploy/compose/         Local development stack
+deploy/contract-capture/ Hardened one-shot live validation image
 deploy/nginx/           Development and production NGINX templates
 docs/                   Requirements, execution plan and contract evidence
 ```

@@ -5,4 +5,4 @@
 /dist/
 /tmp/
 *.part
-
+sanitized-contract-report*.json

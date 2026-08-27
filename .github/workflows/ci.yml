@@ -29,5 +29,17 @@ jobs:
         run: go build ./cmd/cache-helper ./cmd/mock-upstream ./cmd/contract-capture
       - name: Build container image
         run: docker build --tag jcds-content-cache:ci .
+      - name: Validate Docker capture workflow
+        env:
+          JAMF_TOKEN_URL: https://tenant.example/api/v1/oauth/token
+          JAMF_CLIENT_ID: synthetic-client
+          JAMF_CLIENT_SECRET: synthetic-secret
+          JAMF_CATALOG_URL: https://tenant.example/api/v1/jcds/files
+          JAMF_RESOLVER_URL_TEMPLATE: https://tenant.example/api/v1/jcds/files/{filename}
+          CAPTURE_PACKAGE_NAME: Synthetic.pkg
+        run: |
+          bash -n scripts/capture-live-contracts.sh
+          docker compose --file deploy/contract-capture/compose.yaml config --quiet
+          docker build --file deploy/contract-capture/Dockerfile --tag jcds-contract-capture:ci .
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

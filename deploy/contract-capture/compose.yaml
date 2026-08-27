@@ -1,0 +1,28 @@
+name: jcds-contract-capture
+
+services:
+  contract-capture:
+    build:
+      context: ../..
+      dockerfile: deploy/contract-capture/Dockerfile
+    environment:
+      JAMF_TOKEN_URL: ${JAMF_TOKEN_URL:?JAMF_TOKEN_URL is required}
+      JAMF_CLIENT_ID: ${JAMF_CLIENT_ID:?JAMF_CLIENT_ID is required}
+      JAMF_CLIENT_SECRET: ${JAMF_CLIENT_SECRET:?JAMF_CLIENT_SECRET is required}
+      JAMF_CATALOG_URL: ${JAMF_CATALOG_URL:?JAMF_CATALOG_URL is required}
+      JAMF_RESOLVER_URL_TEMPLATE: ${JAMF_RESOLVER_URL_TEMPLATE:?JAMF_RESOLVER_URL_TEMPLATE is required}
+      CAPTURE_PACKAGE_NAME: ${CAPTURE_PACKAGE_NAME:?CAPTURE_PACKAGE_NAME is required}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    init: true
+    network_mode: bridge
