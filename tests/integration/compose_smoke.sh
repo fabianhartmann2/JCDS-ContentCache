@@ -46,7 +46,8 @@ assert_source_header() {
 
 assert_request_id_header() {
   local header_file="$1"
-  if ! grep --extended-regexp --ignore-case --quiet '^X-Request-ID: [0-9a-f]{32}\r?$' "${header_file}"; then
+  if ! sed 's/\r$//' "${header_file}" \
+    | grep --extended-regexp --ignore-case --quiet '^X-Request-ID: [0-9a-f]{32}$'; then
     echo "Expected a 32-character hexadecimal X-Request-ID header" >&2
     sed 's/\r$//' "${header_file}" >&2
     return 1
