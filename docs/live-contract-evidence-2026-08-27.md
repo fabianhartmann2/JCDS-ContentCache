@@ -6,6 +6,7 @@ The published evidence excludes credentials, access tokens, exact hostnames and 
 
 ## Catalog inventory
 
+- Sanitized captures compared: three different packages.
 - Total entries: 194.
 - V1 package entries: 191.
 - V1 package bytes: 34,587,827,423 bytes (34.59 GB / 32.21 GiB).
@@ -14,13 +15,13 @@ The published evidence excludes credentials, access tokens, exact hostnames and 
 ## Sanitized destination and HTTP behavior
 
 - Sanitized destination fingerprint: `sha256:307bd94baef9acea`.
-- Both HTTP probes used the same fingerprint.
-- Redirects observed: zero.
+- All six HTTP probes used the same fingerprint.
+- Redirects observed across all probes: zero.
 
 ### HEAD probe
 
-- Outcome: completed.
-- Status: `200 OK`.
+- All three outcomes: completed.
+- All three statuses: `200 OK`.
 - Content length present: yes.
 - Content length matched the aggregate source metadata: yes.
 - Content type present: yes.
@@ -31,8 +32,8 @@ The published evidence excludes credentials, access tokens, exact hostnames and 
 ### Single-byte range probe
 
 - Request: `Range: bytes=0-0`.
-- Outcome: completed.
-- Status: `206 Partial Content`.
+- All three outcomes: completed.
+- All three statuses: `206 Partial Content`.
 - Content range present: yes.
 - Range honored: yes.
 - Content length present: yes.
