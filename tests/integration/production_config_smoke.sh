@@ -28,6 +28,12 @@ openssl req \
   -out "${certificate_directory}/fullchain.pem" \
   >/dev/null 2>&1
 
+# CI creates this fixture as the unprivileged runner UID. The production key is
+# root-owned mode 0600, but container root cannot read a runner-owned 0600 bind
+# mount after DAC_OVERRIDE is dropped. This certificate is synthetic and lives
+# only in the private temporary directory, so make it readable for nginx -t.
+chmod 0644 "${certificate_directory}/privkey.pem"
+
 CACHE_LISTEN_IP=127.0.0.1 \
 PACKAGE_STORE_PATH="${store_directory}" \
 CACHE_HELPER_ENV_FILE="${helper_environment}" \
