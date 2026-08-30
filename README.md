@@ -9,7 +9,7 @@ https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
-> This repository includes a production-candidate deployment, but it is not yet a production-approved service. Use real Jamf credentials only on the controlled host described in the runbook, with an exact JCDS hostname allowlist. A representative managed-Mac workflow, certificate renewal, retention policy, monitoring ownership, and the remaining production acceptance gates still require validation.
+> The production target is a dedicated Mac running Docker Desktop, but the repository does not yet contain an approved LAN-facing macOS production profile. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Host sizing, Docker Desktop licensing, unattended startup, production storage, firewall enforcement, certificate renewal, retention and monitoring ownership remain production gates.
 
 ## Current milestone
 
@@ -86,13 +86,13 @@ After the mock stack passes, Docker Desktop on a Mac can run a localhost-only in
 
 Follow [Real-backend test on macOS](docs/macos-real-backend-test.md). Never commit or share the completed environment file, tenant hostname, exact JCDS hostname, signed URL, token, secret, or unsanitized helper log.
 
-## Production candidate
+## macOS production target
 
-The first host profile is Ubuntu Server 26.04 LTS on amd64, serving `jcds-cache.appfruit.ch:8443` to `192.168.0.0/16`. Completed packages and hidden temporary files live on one dedicated filesystem mounted at `/srv/jamf-store`. The production Compose definition runs the helper as UID/GID `65532`, gives NGINX read-only access to package storage, uses read-only container root filesystems, drops unnecessary capabilities, and does not publish the helper port.
+The first production target is a dedicated Mac running Docker Desktop and serving `jcds-cache.appfruit.ch:8443` to `192.168.0.0/16`. NGINX and the Go helper continue to run inside Docker Desktop's Linux VM. The existing `deploy/macos/` profile is deliberately bound to localhost and is not the production listener.
 
-The Jamf client secret is supplied through a root-owned mode-`0600` environment file outside the repository. Manual DNS is used for initial certificate issuance, so unattended renewal is not available yet; certificate-expiry monitoring and a named renewal owner are mandatory for the pilot.
+The macOS production design requires a separate TLS-enabled Compose profile, macOS/perimeter firewall enforcement, managed Docker Desktop startup and updates, explicit VM resource sizing, production storage and recovery procedures. The recommended storage starting point is a Docker named volume, subject to a decision about Docker's disk-image location, capacity and recovery. The package store remains derived and rebuildable from JCDS.
 
-Follow [Production-candidate deployment](docs/production-deployment.md) for host preparation, DNS, certificate issuance, configuration, validation, rollout, monitoring, update, and rollback procedures. Do not copy a completed environment file, a real Jamf tenant URL, a signed download URL, or the exact production JCDS hostname into GitHub.
+See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, and [Production deployment](docs/production-deployment.md) for the current readiness plan. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
@@ -152,18 +152,19 @@ deploy/compose/         Local development stack
 deploy/contract-capture/ Hardened one-shot live validation image
 deploy/macos/           Localhost-only real-backend Docker Desktop test
 deploy/nginx/           Development and production NGINX templates
-deploy/production/      Hardened single-host production-candidate stack
-docs/                   Requirements, execution plan and contract evidence
+deploy/production/      Superseded Linux candidate retained pending macOS replacement
+docs/                   Architecture, requirements, execution plan and contract evidence
 ```
 
 ## Documentation
 
 - [Technical requirements](docs/requirements.md)
+- [Production architecture](docs/architecture.md)
 - [Project execution plan](docs/execution-plan.md)
 - [External-contract evidence template](docs/external-contracts.md)
 - [Client request monitoring](docs/client-request-monitoring.md)
 - [Real-backend test on macOS](docs/macos-real-backend-test.md)
-- [Production-candidate deployment](docs/production-deployment.md)
+- [Production deployment readiness](docs/production-deployment.md)
 
 ## Security notes
 

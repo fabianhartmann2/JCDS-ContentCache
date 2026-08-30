@@ -4,13 +4,13 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.6
+**Version:** 0.7
 
-**Date:** 27 August 2026
+**Date:** 30 August 2026
 
 **Owner:** Mac Workplace
 
-**Target:** Production service on a single Linux container host
+**Target:** Production service on a dedicated Mac running Docker Desktop
 
 **Audience:** Mac Workplace engineering, infrastructure, security, operations and service ownership
 
@@ -18,7 +18,7 @@
 
 ## 1. Executive summary
 
-The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through the company-controlled endpoint `https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg`. The canonical request path maps directly to a human-readable local path such as `/srv/jamf-store/packages/ExampleFile.pkg`. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to an internal Jamf download helper, which obtains or reuses an OAuth access token, reads authoritative size and SHA3-512 metadata, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written and hashed in hidden temporary storage; only a transfer matching the Jamf catalog length and SHA3-512 digest is atomically published under the final original filename.
+The proposed service is a production filesystem-backed pull-through package store for software packages held in JCDS. Clients request a package through the company-controlled endpoint `https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg`. NGINX and a Go helper run as containers inside Docker Desktop's Linux VM on a dedicated Mac. The canonical request path maps directly to a human-readable container path such as `/srv/jamf-store/packages/ExampleFile.pkg`, backed by persistent Docker Desktop storage. NGINX serves an existing complete file directly from that path. If the file is absent, NGINX forwards the request to the helper, which obtains or reuses an OAuth access token, reads authoritative size and SHA3-512 metadata, resolves a temporary JCDS download URL through the Jamf Pro API, and streams the package through NGINX. The response is forwarded to the first client while being written and hashed in hidden temporary storage; only a transfer matching the Jamf catalog length and SHA3-512 digest is atomically published under the final original filename.
 
 The service is deliberately split into two components. NGINX owns TLS termination, normalized filesystem lookup, static-file delivery, miss routing, downstream streaming and request controls. A small purpose-built helper owns OAuth client-credentials authentication, Jamf API interaction, JSON parsing, signed-URL validation, upstream streaming, temporary-file management, atomic publication and per-package single-flight coordination. This separation keeps lifecycle-sensitive Jamf API logic out of the web server configuration while preserving a simple local file layout.
 
@@ -87,7 +87,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 - A persistent human-readable package store using original filenames, a non-public temporary area, capacity protection, cleanup, pre-population and administrative removal.
 
-- Containerized deployment on one managed Linux server.
+- Containerized deployment through Docker Desktop on one dedicated managed Mac.
 
 - Logging, metrics, health checks, alert integration and operational documentation.
 
@@ -119,7 +119,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 |------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------|
 | Delivery stage         | Production system                                                                                                                                                          | Resolved            |
 | Package identity       | Package filenames are immutable; the same filename always represents the same bytes.                                                                                       | Resolved            |
-| Initial deployment     | NGINX and the Jamf helper run as containers on one managed Linux host.                                                                                                     | Resolved            |
+| Initial deployment     | NGINX and the Jamf helper run as containers through Docker Desktop on one dedicated managed Mac.                                                                            | Resolved            |
 | Client namespace       | A stable HTTPS /packages/{filename} endpoint is used.                                                                                                                      | Baseline assumption |
 | Upstream               | One Jamf Pro tenant and JCDS are used in the first release.                                                                                                                | Baseline assumption |
 | Storage representation | A completed request path maps to the same human-readable local path and filename; for example, /packages/ExampleFile.pkg maps to /srv/jamf-store/packages/ExampleFile.pkg. | Resolved            |
@@ -129,10 +129,10 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
 | Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
 | Cache storage          | Provision 500 GB–1 TB of usable cache storage and retain at least 20 percent operational headroom.                                                                          | Resolved range      |
-| Host baseline          | Use Ubuntu Server 26.04 LTS on amd64/x86_64 for the first host.                                                                                                             | Resolved            |
+| Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Permit source CIDR `192.168.0.0/16`; no additional client authentication is required for v1.                                                                               | Resolved            |
-| Host storage path      | Mount the dedicated local package-store filesystem at `/srv/jamf-store`; do not use `/usr` for served data.                                                                | Resolved            |
+| Storage boundary       | Keep `/srv/jamf-store` as the container path; select and validate either a Docker named volume or dedicated APFS bind mount for production.                                 | Open                |
 | Secret delivery        | Pass the Jamf client secret through a root-owned mode-`0600` host environment file outside Git.                                                                             | Resolved            |
 | DNS and certificate    | Use manual DNS records and manual DNS validation for initial certificate issuance; expiry monitoring is mandatory and unattended renewal remains a production gate.          | Pilot decision      |
 | Outbound network       | Connect directly over validated HTTPS without an outbound proxy or TLS inspection.                                                                                          | Resolved            |
@@ -144,7 +144,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | **Stakeholder**               | **Primary responsibility**                                                                                       |
 |-------------------------------|------------------------------------------------------------------------------------------------------------------|
 | Service owner / Mac Workplace | Own requirements, client integration, service acceptance, package naming policy and support model.               |
-| Platform / infrastructure     | Provide and patch the Linux host, container runtime, storage, network, DNS, TLS and monitoring integration.      |
+| Platform / infrastructure     | Provide and patch the Mac, macOS, Docker Desktop, storage, network, DNS, TLS and monitoring integration.          |
 | Security                      | Review authentication, secret storage, network controls, logging, image hardening and threat model.              |
 | Jamf administration           | Create the least-privilege API role/client, monitor deprecated JCDS endpoints and provide sanitized schema evidence. |
 | Operations                    | Monitor the service, respond to alerts, rotate secrets, manage capacity and follow recovery procedures.          |
@@ -567,15 +567,23 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | Persistent package-store volume | Human-readable final packages and hidden temporary files                                                                            | Writable only by the package-publication path |
 | Secrets/certificates            | Jamf client secret in a root-owned host environment file; TLS key and trust configuration in the host certificate tree             | Helper environment only / NGINX read-only mount |
 
+- Docker Desktop must be licensed for the enterprise, supported on the selected macOS release, managed through the approved Mac-management controls and assigned explicit CPU, memory and disk limits.
+
+- Docker Desktop Resource Saver must be disabled for this always-on service. macOS and Docker Desktop updates must use controlled maintenance windows with post-update health validation.
+
 - Images must use approved registries, pinned versions or digests and a documented patch cadence.
 
 - The helper should be a small statically compiled service, such as Go, with bounded streaming buffers and no shell execution.
 
-- The helper must run as a non-root UID. NGINX may retain its standard root master solely to read the host certificate and switch to unprivileged workers; it must drop all unrelated capabilities. Both containers must use no-new-privileges and read-only root filesystems with only explicit writable paths.
+- The production helper should run as a non-root UID. If Docker Desktop's named-volume ownership model prevents this, UID 0 may be considered only through an approved exception with all capabilities dropped, `no-new-privileges`, a read-only root filesystem and the package volume as its only writable data path. NGINX may retain its standard root master solely to read the certificate and switch to unprivileged workers; it must drop all unrelated capabilities.
 
 - Only the package-store staging/finalization path and explicitly required runtime directories may be writable; static-serving workers should have the minimum required write access.
 
 - Startup must fail clearly on invalid configuration, missing secrets or invalid TLS material.
+
+- Production readiness must demonstrate unattended recovery after a Mac reboot, Docker Desktop restart and managed update. The design must state whether a dedicated macOS account must remain logged in.
+
+- The localhost-only `deploy/macos/` profile must not be exposed to the LAN. Production requires a separate TLS-enabled macOS Compose profile.
 
 ### 13.2 Configuration
 
@@ -584,7 +592,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | Service         | hostname, listen port, TLS certificate/key paths, client access policy                                                            |
 | Jamf            | tenant base URL, OAuth path, catalog and resolver adapter versions, API client ID and secret reference                           |
 | Upstream policy | allowed signed-URL host patterns, redirect limit, DNS/IP restrictions, TLS trust                                                  |
-| Package store   | root, temporary path, maximum usage, cleanup/inactive retention, lock timeout, minimum free space, file ownership and permissions |
+| Package store   | container root/temporary paths, Docker volume or APFS backing path, Docker disk-image location/limit, cleanup, lock timeout, minimum free space, ownership and permissions |
 | HTTP            | connect/read/send timeouts, maximum package size, range policy, client-abort behaviour                                            |
 | Observability   | log format/level, metrics listener, correlation header and monitoring destination                                                 |
 
@@ -608,7 +616,9 @@ The baseline NGINX behavior-log schema and privacy boundary are defined in `docs
 
 - After container restart or host reboot, complete final files must remain usable and stale temporary files must be handled according to policy.
 
-- If the package-store volume is lost, the service may start with an empty store and repopulate on demand after storage is restored.
+- Docker Desktop and the Compose application must recover without manual intervention after the approved macOS startup sequence. Container restart policies are not sufficient unless Docker Desktop itself starts successfully.
+
+- If the package-store volume or Docker Desktop VM disk is lost, the service may start with an empty store and repopulate on demand after storage is restored. Configuration, certificates and deployment metadata must be recoverable independently of cached package bytes.
 
 - If Jamf/JCDS is unavailable, locally stored immutable packages remain available; absent packages fail predictably.
 
@@ -670,7 +680,9 @@ This evidence does not close the production gates. Actual managed-Mac traffic is
 | **Risk**                     | **Impact**                                                                                                | **Primary mitigation**                                                                                                                                   |
 |------------------------------|-----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Deprecated Jamf endpoints    | The selected resolver and catalog endpoints may be removed or changed before Jamf introduces replacements. | Accept and monitor the dependency risk; isolate both behind versioned adapters and migrate without changing client URLs when replacements appear.        |
-| Single-host outage           | Host or storage failure makes the service unavailable.                                                    | Document and accept the initial risk; automate restart/rebuild and define a later HA option if the SLO requires it.                                      |
+| Mac/Docker Desktop outage    | Mac, user session, Docker Desktop VM or storage failure makes the service unavailable.                    | Prove unattended recovery, monitor every layer, document the single-node risk and define a later HA option if the SLO requires it.                       |
+| Docker Desktop lifecycle     | Resource Saver, application updates, macOS updates or a missing user session can stop the service.        | Disable Resource Saver, manage settings and updates, use a dedicated operating model and test reboot/update recovery before pilot.                       |
+| Docker VM disk exhaustion    | Named-volume growth can exhaust Docker's VM disk image or the underlying APFS volume.                     | Set explicit disk limits, monitor Docker and macOS free space, preserve 20 percent headroom and exercise cleanup/recovery.                                |
 | Signed-URL destination drift | JCDS/CDN hostnames may change and break a strict allowlist.                                               | Base the policy on Jamf-published domains, monitor rejections and use controlled configuration change rather than arbitrary egress.                      |
 | Unsafe or partial-file publication | An interrupted transfer or tampered filesystem object could be exposed as a valid package. | Serve regular files only; deny symbolic links; keep temporary files outside the served namespace; publish only a complete validated 200 response by atomic rename; audit permissions and unexpected objects. |
 | Range request bypass         | Clients that request only ranges may prevent full-object store population or cause duplicate traffic.     | Capture actual client behaviour; force a complete upstream retrieval on a miss and serve ranges from the completed local file.                           |
@@ -760,19 +772,67 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Parse the observed complete array. If a future response uses an envelope that reports more records than it contains, fail explicitly instead of returning a false not-found result.
 - **Required follow-up:** Retain contract tests and monitor the deprecated endpoint for schema changes.
 
+#### OQ-14 — Production Mac hardware (OPEN)
+
+- **Decision required:** Which dedicated Mac model, Apple silicon generation, RAM, internal storage, external storage and network interface will host the service?
+- **Recommended default:** A dedicated wired Mac mini with at least 16 GB RAM, with 24–32 GB preferred, and storage sized above the 500 GB–1 TB usable-cache requirement plus 20 percent headroom.
+- **Required by:** macOS production profile implementation and procurement
+
+#### OQ-15 — Docker Desktop licensing and ownership (OPEN)
+
+- **Decision required:** Is an enterprise Docker Desktop subscription available, and which team owns licensing, settings enforcement and updates?
+- **Recommended default:** Docker Business managed through the enterprise Mac-management platform.
+- **Required by:** Production approval
+
+#### OQ-16 — Unattended startup and session model (OPEN)
+
+- **Decision required:** May a dedicated macOS service account remain logged in, and how must the service recover after reboot without manual interaction?
+- **Recommended default:** Use a dedicated service account and prove Docker Desktop plus Compose recovery after reboot; if a persistent session is prohibited, reassess Docker Desktop as the production runtime.
+- **Required by:** Architecture approval
+
+#### OQ-17 — Production storage backing (OPEN)
+
+- **Decision required:** Will `/srv/jamf-store` use a Docker named volume or a dedicated APFS bind mount, and where will Docker's VM disk image reside?
+- **Recommended default:** Start with a named volume because it passed the real-backend Mac test; place and size Docker's disk image on managed APFS storage and treat cache bytes as rebuildable.
+- **Required by:** Capacity design and production Compose implementation
+
+#### OQ-18 — macOS firewall and client-address visibility (OPEN)
+
+- **Decision required:** Which macOS or perimeter control will enforce `192.168.0.0/16`, and does Docker Desktop preserve the real client source address at NGINX?
+- **Recommended default:** Enforce the CIDR before Docker Desktop using macOS `pf` or an approved perimeter firewall; treat NGINX CIDR rules as defense in depth until LAN tests prove source-address visibility.
+- **Required by:** Security design
+
+#### OQ-19 — Docker Desktop resource and update policy (OPEN)
+
+- **Decision required:** What CPU, RAM, swap, disk-image limit, Resource Saver, automatic-update and maintenance-window settings apply?
+- **Recommended default:** Disable Resource Saver, allocate fixed resources, prevent uncontrolled production updates and validate health after every macOS or Docker Desktop update.
+- **Required by:** Operations readiness
+
+#### OQ-20 — Cache recovery and backup (OPEN)
+
+- **Decision required:** Must cached or manually pre-populated packages be backed up, or may the package store be rebuilt entirely from JCDS?
+- **Recommended default:** Treat packages as rebuildable derived data; protect configuration, certificates and runbooks and test empty-cache recovery.
+- **Required by:** Recovery design
+
+#### OQ-21 — Production helper identity (OPEN)
+
+- **Decision required:** Can the production helper remain non-root with the chosen Docker Desktop storage model, or is the tested UID-0/all-capabilities-dropped compatibility model acceptable?
+- **Recommended default:** Prefer non-root. Permit UID 0 only through a documented exception retaining `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and a narrowly writable package volume.
+- **Required by:** Security approval and production Compose implementation
+
 ### 16.1 Confirmed decisions
 
 | **ID** | **Decision**           | **Confirmed value**                                                                                                                                             |
 |--------|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | D-01   | Delivery stage         | Production system.                                                                                                                                              |
 | D-02   | Package identity       | Filenames are immutable; corrected versions receive new names.                                                                                                  |
-| D-03   | Initial deployment     | NGINX and helper containers on one managed Linux host.                                                                                                          |
+| D-03   | Initial deployment     | NGINX and helper containers through Docker Desktop on one dedicated managed Mac.                                                                                |
 | D-04   | Jamf API lifecycle     | Use the deprecated JCDS resolver and catalog endpoints until Jamf introduces replacements; keep both behind replaceable adapters.                                |
 | D-05   | Publication integrity  | Require catalog length and SHA3-512 verification before atomic publication; do not treat MD5 as the security boundary.                                           |
 | D-07   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
 | D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
 | D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
-| D-10   | Host profile           | Ubuntu Server 26.04 LTS on amd64/x86_64 with a dedicated local filesystem mounted at `/srv/jamf-store`.                                                          |
+| D-10   | Host profile           | Dedicated Mac running a supported macOS release and Docker Desktop; hardware, storage backing and startup/session model remain open under OQ-14 through OQ-17. |
 | D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` and permit `192.168.0.0/16`; no additional v1 client authentication.                                                       |
 | D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |
 | D-13   | Secret delivery        | Inject the Jamf client secret into the helper from a root-owned mode-`0600` host environment file outside Git.                                                   |
@@ -799,7 +859,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 network controls (OQ-06).
 
-4.  Set the SLO, package-store capacity, cleanup policy and Linux host/storage sizing (OQ-04 and OQ-07).
+4.  Set the SLO and cleanup policy, then answer the Mac hardware, startup, storage, firewall and runtime-identity decisions (OQ-04, OQ-07 and OQ-14 through OQ-21).
 
 5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 

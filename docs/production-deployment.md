@@ -1,319 +1,263 @@
-# Production-candidate deployment
+# macOS production deployment readiness
 
 ## Status and scope
 
-This runbook deploys the first single-host production candidate for:
+The production target is a dedicated Mac running Docker Desktop. This document
+defines the preparation and acceptance work for that target. It is not yet an
+executable deployment runbook because the blocking decisions in
+`docs/architecture.md` have not all been answered and
+`deploy/macos-production/` has not been implemented.
+
+The existing profiles have different purposes:
+
+| Profile | Purpose | Production status |
+|---|---|---|
+| `deploy/compose/` | Credential-free mock development and CI | Not production |
+| `deploy/macos/` | Localhost-only real Jamf/JCDS integration test | Not production; never expose to the LAN |
+| `deploy/production/` | Earlier Ubuntu/Docker Engine candidate | Superseded; retained temporarily for reference |
+| `deploy/macos-production/` | Future TLS-enabled Mac production profile | Not yet implemented |
+
+## Confirmed service boundary
 
 | Setting | Confirmed value |
 |---|---|
-| Operating system | Ubuntu Server 26.04 LTS, amd64/x86_64 |
-| Service DNS name | `jcds-cache.appfruit.ch` |
-| Client network | `192.168.0.0/16` |
-| Client authentication | Network CIDR restriction for v1 |
+| Host platform | Dedicated Mac running Docker Desktop |
+| Service DNS | `jcds-cache.appfruit.ch` |
 | Listener | HTTPS on TCP 8443 |
-| Package-store mount | `/srv/jamf-store` |
-| Suggested capacity | 1 TB SSD-backed ext4 with 20% free-space protection |
-| Jamf secret delivery | Root-owned host environment file passed to the container |
-| Certificate | Public certificate obtained through a manual DNS challenge |
+| Client network | `192.168.0.0/16` |
+| Client authentication | CIDR restriction plus server-authenticated TLS for v1 |
+| Workload | 500–2,000 managed Macs |
+| Cache capacity | 500 GB–1 TB usable with at least 20 percent headroom |
+| Container data paths | `/srv/jamf-store/packages` and `/srv/jamf-store/.temporary` |
+| Outbound network | Direct validated HTTPS; no proxy or TLS inspection |
+| Package integrity | Exact Jamf catalog length and SHA3-512 before atomic publication |
 
-Manual DNS validation cannot provide unattended certificate renewal. This configuration is suitable for a controlled pilot only until DNS automation or an internal certificate service is available. Assign an owner and an expiry alert before any managed-client rollout.
+## Production blockers
 
-The deployment intentionally retains an environment variable for the Jamf client secret because that delivery method was selected. The completed file is mode `0600` outside the Git checkout, but the value remains visible to root and Docker administrators through container inspection. Never paste the value into chat, a terminal command, Compose YAML, Git, tickets, or normal logs.
+Implementation of the production Compose profile requires answers for:
 
-## Host baseline
+1. Mac model, Apple silicon generation, RAM, storage and network interface.
+2. Docker Desktop subscription entitlement and operational owner.
+3. Dedicated macOS account and unattended restart/session model.
+4. Docker named volume versus APFS bind mount and Docker VM disk placement.
+5. macOS/perimeter firewall implementation and source-address visibility.
+6. Production helper UID model for the selected storage implementation.
 
-Provision an amd64 Ubuntu Server 26.04 LTS host with at least:
+The pilot additionally requires Docker resource/update policy, cache recovery,
+certificate-renewal ownership, monitoring ownership, retention and SLO.
 
-- 4 vCPU
-- 8 GB RAM
-- 1 Gbit/s network connectivity
-- A separate 1 TB SSD-backed ext4 filesystem mounted at `/srv/jamf-store`
-- A separate system/root volume with at least 40 GB free
-- Correct DNS and time synchronization
-- Outbound TCP 443 access to the Jamf tenant and the exact approved JCDS hostname
-- Inbound TCP 8443 only from `192.168.0.0/16`
+## Recommended host baseline
 
-Use Docker Engine and the Compose plugin from Docker's official Ubuntu repository. Docker documents Ubuntu 26.04 LTS as supported. Do not use Docker's convenience installation script for production.
+Until OQ-14 is resolved, use the following planning baseline:
 
-Install the host utilities used by this runbook after the base operating system is patched:
+- Dedicated wired Apple-silicon Mac mini.
+- At least 16 GB RAM; 24–32 GB preferred.
+- Internal or managed external APFS capacity sufficient for Docker Desktop,
+  500 GB–1 TB usable package data and 20 percent free-space headroom.
+- Static address or DHCP reservation and stable DNS/time synchronization.
+- Supported macOS release managed through MDM.
+- Sleep and automatic power-off disabled for the always-on service.
+- UPS-backed power where required by the agreed recovery objective.
 
-```bash
-sudo apt update
-sudo apt full-upgrade --yes
-sudo apt install --yes certbot curl dnsutils git jq openssl
-```
+Docker Desktop supports the current and two previous major macOS releases.
+The service owner must keep the host within that support window:
 
-Install Docker Engine and `docker-compose-plugin` from Docker's official Ubuntu apt repository, then verify the installed runtime before continuing:
+- <https://docs.docker.com/desktop/setup/install/mac-install/>
 
-```bash
-sudo docker version
-sudo docker compose version
-```
+## Docker Desktop governance
 
-The package-store filesystem may use `nodev,nosuid,noexec` because the host never executes package contents. The `packages` and `.temporary` directories must be on that same filesystem so publication can use an atomic rename. Do not use `/usr` for package data and do not use an untested NFS mount.
+Professional use of Docker Desktop in a large organization requires an
+appropriate paid subscription. Licensing, organization sign-in, settings
+management and updates must have named owners before production approval:
 
-## DNS
+- <https://docs.docker.com/subscription/desktop-license/>
+- <https://docs.docker.com/enterprise/security/enforce-sign-in/>
 
-Create an `A` record for `jcds-cache.appfruit.ch` that resolves to the host's client-facing private address. Do not publish an internet-routable cache listener merely to obtain a certificate; the manual DNS-01 challenge proves domain control using a TXT record.
+The managed configuration must explicitly define:
 
-Verify from a managed-client network:
+- Docker Desktop version/update channel and maintenance window;
+- CPU, memory, swap and disk-image limit;
+- disk-image location;
+- Resource Saver disabled;
+- sign-in/organization enforcement where required;
+- diagnostics and support-data handling;
+- settings-change permissions for the dedicated service account.
 
-```bash
-dig +short jcds-cache.appfruit.ch
-```
+Resource Saver is enabled by default and is unsuitable for an always-on cache:
 
-## Package-store and configuration directories
+- <https://docs.docker.com/desktop/use-desktop/resource-saver/>
+- <https://docs.docker.com/desktop/settings-and-maintenance/settings/>
 
-After the dedicated filesystem is mounted, create the runtime directories:
+## Startup and session model
 
-```bash
-sudo install -d -m 0755 /srv/jamf-store
-sudo install -d -o 65532 -g 65532 -m 0755 /srv/jamf-store/packages
-sudo install -d -o 65532 -g 65532 -m 0700 /srv/jamf-store/.temporary
-sudo install -d -o root -g root -m 0700 /etc/jcds-content-cache
-```
+Docker Desktop is a macOS application backed by a Linux VM, not a conventional
+host Docker Engine daemon. Container restart policies take effect only after
+Docker Desktop is running. The approved operating model must document:
 
-Validate that both data directories use the same filesystem and that capacity is available:
+- the dedicated macOS account that owns/runs Docker Desktop;
+- whether that account may remain logged in;
+- how Docker Desktop starts after reboot;
+- how the Compose application starts after Docker Desktop becomes ready;
+- how startup failures alert operations;
+- how FileVault unlock and unattended reboot constraints are handled;
+- how macOS and Docker Desktop updates are staged and validated.
 
-```bash
-findmnt /srv/jamf-store
-df -h /srv/jamf-store
-stat -c '%d %a %u:%g %n' \
-  /srv/jamf-store/packages \
-  /srv/jamf-store/.temporary
-```
+The production pilot must include cold-boot evidence from power-on to a healthy
+HTTPS endpoint without undocumented manual actions. Docker Desktop provides a
+CLI for start/stop/restart operations, but its use must be integrated into the
+approved macOS session and management model:
 
-The device number printed for both directories must match. The expected ownership is numeric UID/GID `65532:65532`; completed packages become mode `0644`, while temporary files and their directory are private to the helper.
+- <https://docs.docker.com/desktop/features/desktop-cli/>
 
-## Source checkout
+## Package-store selection
 
-Until PR #1 is reviewed and merged, deploy the production-candidate branch explicitly:
+### Option A — Docker named volume
 
-```bash
-sudo git clone \
-  --branch codex/m1-streaming-cache \
-  --single-branch \
-  https://github.com/fabianhartmann2/JCDS-ContentCache.git \
-  /opt/jcds-content-cache
+Recommended starting position because it passed the real-backend Mac test and
+avoids the single-file bind-mount and cross-UID ownership failures observed on
+Docker Desktop.
 
-cd /opt/jcds-content-cache
-```
+Requirements:
 
-Record the exact revision used:
+- Docker VM disk image placed on sufficiently large managed APFS storage;
+- disk limit larger than maximum cache use plus operational headroom;
+- monitoring of Docker volume usage, Docker disk-image use and host APFS free
+  space;
+- administrative inventory/removal commands that operate through a container;
+- tested recovery after Docker Desktop reset, reinstall or VM-disk failure.
 
-```bash
-git rev-parse HEAD
-```
+Docker Desktop stores Mac container data in one large disk-image file. Its
+location and limit are managed through Docker Desktop settings:
 
-## Host-local Jamf environment
+- <https://docs.docker.com/desktop/troubleshoot-and-support/faqs/macfaqs/>
 
-Install the templates outside the repository:
+### Option B — dedicated APFS bind mount
 
-```bash
-sudo install -o root -g root -m 0600 \
-  deploy/production/cache-helper.env.example \
-  /etc/jcds-content-cache/cache-helper.env
+Provides host-visible package filenames but is not approved until testing proves:
+
+- sustained large-file throughput;
+- same-filesystem atomic rename;
+- stable permissions across containers and reboots;
+- no `EIO` or file-sharing failures;
+- behaviour across Docker Desktop and macOS updates;
+- safe host-side pre-population and cleanup.
 
-sudo install -o root -g root -m 0644 \
-  deploy/production/deployment.env.example \
-  /etc/jcds-content-cache/deployment.env
+The selected implementation must retain `/srv/jamf-store` as the internal
+container root so application logic and tests remain portable.
 
-sudoedit /etc/jcds-content-cache/cache-helper.env
-sudoedit /etc/jcds-content-cache/deployment.env
-```
-
-Replace every `REPLACE` value in `cache-helper.env`:
-
-- `JAMF_TOKEN_URL`: tenant OAuth endpoint ending in `/api/oauth/token`
-- `JAMF_CLIENT_ID`: dedicated read-only Jamf API client identifier
-- `JAMF_CLIENT_SECRET`: dedicated API client secret; retain single quotes so Compose treats the value literally
-- `JAMF_CATALOG_URL`: tenant endpoint ending in `/api/v1/jcds/files`
-- `JAMF_RESOLVER_URL_TEMPLATE`: tenant endpoint ending in `/api/v1/jcds/files/{filename}`
-- `JCDS_ALLOWED_HOSTS`: the exact hostname from the resolved `uri`, without scheme, path, port, query, wildcard, or IP address
-
-The deprecated Jamf resolver endpoint is intentional until Jamf provides a replacement. Never store a returned signed URL. Multiple approved exact JCDS hostnames may be separated with commas.
-
-Confirm that placeholders are gone without printing the file:
-
-```bash
-if sudo grep --quiet REPLACE /etc/jcds-content-cache/cache-helper.env; then
-  echo 'Configuration still contains REPLACE values' >&2
-  exit 1
-fi
-
-sudo stat -c '%a %U:%G %n' \
-  /etc/jcds-content-cache/cache-helper.env \
-  /etc/jcds-content-cache/deployment.env
-```
-
-## Manual DNS certificate issuance
-
-Install Certbot from Ubuntu and request a certificate using a manual DNS challenge:
-
-```bash
-sudo apt update
-sudo apt install certbot
-
-sudo certbot certonly \
-  --manual \
-  --preferred-challenges dns \
-  --cert-name jcds-cache.appfruit.ch \
-  --domain jcds-cache.appfruit.ch \
-  --agree-tos \
-  --email YOUR-OPERATIONS-EMAIL
-```
-
-Certbot will display a `_acme-challenge.jcds-cache.appfruit.ch` TXT record. Create that record in DNS, wait until the TXT value is visible from the authoritative DNS service, and only then continue Certbot.
-
-The required files must then exist:
-
-```text
-/etc/letsencrypt/live/jcds-cache.appfruit.ch/fullchain.pem
-/etc/letsencrypt/live/jcds-cache.appfruit.ch/privkey.pem
-```
-
-Inspect the certificate without exposing the private key:
-
-```bash
-sudo openssl x509 \
-  -in /etc/letsencrypt/live/jcds-cache.appfruit.ch/fullchain.pem \
-  -noout -subject -issuer -dates
-```
-
-Because the DNS challenge is manual, normal unattended `certbot renew` is not sufficient. Rerun the same interactive certificate command before expiry, then reload NGINX. The repository's expiry check returns failure when fewer than 30 days remain:
-
-```bash
-sudo scripts/check-certificate-expiry.sh
-```
-
-After a renewed certificate is present, validate and reload NGINX without interrupting an active package fill:
-
-```bash
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  exec nginx nginx -t
-
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  exec nginx nginx -s reload
-```
-
-Run this check daily from the monitoring platform or a systemd timer and alert on a nonzero exit. Certificate automation remains a production-approval gate.
-
-## Validate and start
-
-From `/opt/jcds-content-cache`:
-
-```bash
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  config --quiet
-
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  build --pull
-
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  up --detach
-```
-
-Check container state and the private readiness path:
-
-```bash
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  ps
-
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  exec nginx wget --quiet --output-document - \
-  http://127.0.0.1:8080/health/ready
-```
-
-Both long-running containers must report healthy. If they do not, inspect only the recent logs and do not paste unsanitized helper logs into a public channel because helper diagnostics may contain package filenames:
-
-```bash
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  logs --tail 100 cache-helper nginx
-```
-
-## Network controls
-
-NGINX permits the complete `192.168.0.0/16` client range and denies other source addresses. Also enforce the same rule in the host or perimeter firewall. Docker-published ports interact with host firewall rules, so apply restrictions through the approved Docker-aware mechanism, such as the `DOCKER-USER` chain, and validate from both an allowed and denied network before the pilot.
-
-Only TCP 8443 is published. The helper and plaintext health listener remain on the Docker network/container loopback and are not host-published.
-
-## Managed-client validation
-
-From one Mac in `192.168.0.0/16`, verify DNS, certificate trust, and readiness:
-
-```bash
-curl --fail --show-error \
-  https://jcds-cache.appfruit.ch:8443/health/ready
-```
-
-Then request one approved non-sensitive package using its exact flat `.pkg` filename:
-
-```bash
-curl --fail --show-error \
-  --dump-header /tmp/jcds-cache-first.headers \
-  --output /tmp/jcds-cache-test.pkg \
-  'https://jcds-cache.appfruit.ch:8443/packages/REPLACE-PACKAGE.pkg'
-```
-
-The first request should return `X-Package-Source: JCDS`. Repeat the request; the second response should return `X-Package-Source: LOCAL`. Verify the downloaded package using the normal macOS signature workflow before installation.
-
-After this controlled curl validation, trigger the package through the actual managed-Mac workflow. Curl traffic is classified as `curl`; the real workflow is needed to settle OQ-05 and tune the macOS client classifications.
-
-## Client-behavior records
-
-Extract the privacy-safe NGINX records:
-
-```bash
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  logs --no-color nginx \
-  | sed -n 's/^[^{]*//p' \
-  | jq -c 'select(.event == "package_request")'
-```
-
-These records omit package paths, package names, query strings, raw ranges, raw user agents, authorization, cookies, and signed URLs. They contain source IP addresses and must remain access-controlled.
-
-## Updates and rollback
-
-Before an update, record the current commit and validate that no fill is active. Pull only reviewed fast-forward changes, rebuild, and recreate the containers without deleting `/srv/jamf-store`:
-
-```bash
-cd /opt/jcds-content-cache
-git rev-parse HEAD
-sudo git pull --ff-only
-
-sudo docker compose \
-  --env-file /etc/jcds-content-cache/deployment.env \
-  --file deploy/production/compose.yaml \
-  up --detach --build
-```
-
-For rollback, check out the previously recorded commit, rebuild, and run `up --detach` again. Do not run `down --volumes`, delete `/srv/jamf-store`, or overwrite completed packages during normal rollback.
-
-## Pilot exit conditions
-
-Do not expand beyond the pilot until all of the following are true:
-
-- A real managed Mac successfully completes its normal download/install workflow.
-- Actual `GET`, `HEAD`, range, resume, abort, and retry behavior is understood.
-- Every legitimate JCDS hostname and redirect is accounted for by exact allowlisting.
-- Certificate expiry monitoring has an owner and renewal rehearsal.
-- Host firewall enforcement has been validated from allowed and denied networks.
-- Disk alerts, log access/retention, backup/rebuild expectations, rollback, and service ownership are approved.
+## Cache backup and recovery
+
+The recommended policy is to treat cached packages as derived data that can be
+retrieved again from JCDS. Configuration, certificate material, deployment
+revision, settings and runbooks require protection; package bytes do not require
+backup unless operations chooses to preserve manually pre-populated content.
+
+Recovery acceptance must demonstrate:
+
+- rebuilding an empty package store;
+- restoring configuration and certificates without exposing secrets;
+- restarting after Docker Desktop VM-disk replacement;
+- preserving or intentionally discarding completed packages according to the
+  approved policy.
+
+Docker's documented Desktop backup/restore procedure is a reference, not a
+substitute for a tested service runbook:
+
+- <https://docs.docker.com/desktop/settings-and-maintenance/backup-and-restore/>
+
+## Secrets and certificates
+
+The Jamf client secret must remain outside Git and outside container images. The
+production decision is a protected Mac host file injected only into the helper.
+The final path and ownership depend on the dedicated service-account model. The
+file must not be placed inside the source checkout, copied to tickets or exposed
+through normal logs.
+
+TLS certificates for `jcds-cache.appfruit.ch` must be stored in a protected
+macOS directory and mounted read-only into NGINX. Manual DNS validation remains
+acceptable for the controlled pilot only when:
+
+- a certificate-renewal owner is named;
+- expiry is monitored with at least 30 days warning;
+- renewal and NGINX reload are tested;
+- unattended renewal is planned before general production approval.
+
+## Network and firewall controls
+
+The production listener binds TCP 8443 to the approved host interface. The
+localhost test profile must remain bound to `127.0.0.1`.
+
+Because Docker Desktop forwards traffic through its Linux VM, the production
+design must not assume that NGINX receives the original client source address.
+Before pilot:
+
+1. Select an approved macOS `pf` or perimeter-firewall implementation.
+2. Enforce inbound TCP 8443 only from `192.168.0.0/16` before traffic reaches
+   Docker Desktop.
+3. Test one allowed and one denied client.
+4. Record the address observed by NGINX and determine whether it is suitable for
+   client correlation.
+5. Keep NGINX CIDR controls as defense in depth where source addresses are
+   preserved.
+
+Only TCP 8443 may be published. The helper and plaintext health endpoint remain
+inside the Docker network/container boundary. Outbound HTTPS is limited to the
+Jamf tenant and exact approved JCDS/CDN hostnames, with every redirect
+revalidated.
+
+## Production profile requirements
+
+`deploy/macos-production/` must provide:
+
+- a baked, reviewed NGINX configuration to avoid fragile configuration bind
+  mounts;
+- TLS listener on 8443 and no plaintext LAN listener;
+- private helper network with no published helper port;
+- selected persistent storage implementation;
+- read-only container root filesystems and `no-new-privileges`;
+- all unnecessary capabilities dropped;
+- approved helper UID model;
+- CPU, memory, PID and logging bounds;
+- health checks and restart policies;
+- certificate and secret mounts/injection;
+- capacity thresholds and temporary-file cleanup;
+- architecture-compatible images for the selected Apple silicon host.
+
+## Monitoring and operations
+
+Production monitoring must cover:
+
+- HTTPS readiness and certificate expiry;
+- Docker Desktop application/VM availability;
+- container health and restart loops;
+- local hits, upstream fills, status classes, latency and bytes;
+- OAuth/Jamf/JCDS failures and redirect-policy rejections;
+- active fills, integrity failures and temporary-file cleanup;
+- package-store, Docker VM disk and host APFS capacity;
+- macOS reboot/update and Docker Desktop update outcomes.
+
+NGINX behavior records must retain the existing privacy boundary: no package
+name, URI, query, raw range, raw user agent, credentials or signed URL.
+
+## Pilot acceptance sequence
+
+1. Resolve OQ-14 through OQ-21 and approve the architecture.
+2. Implement and review `deploy/macos-production/`.
+3. Build and test the selected ARM64 images in CI and on the target Mac.
+4. Configure DNS, certificate, firewall, storage and protected secret delivery.
+5. Prove cold-boot recovery and controlled update/restart behavior.
+6. Validate allowed and denied LAN clients plus TLS trust.
+7. Run real miss, local hit, range, restart, upstream-outage, disk-low and
+   integrity-failure tests.
+8. Measure throughput, time to first byte, CPU, RAM, disk I/O, Docker disk growth
+   and WAN savings.
+9. Pilot with a small managed-client group and agreed rollback criteria.
+10. Obtain service-owner, security and operations approval before expansion.
+
+## Rollback principle
+
+Application rollback must recreate the prior reviewed images and configuration
+without deleting the package volume. Platform rollback must separately cover
+Docker Desktop and macOS updates. Never use `docker compose down --volumes` in
+normal rollback or troubleshooting unless intentional cache deletion is
+approved and clearly communicated.
