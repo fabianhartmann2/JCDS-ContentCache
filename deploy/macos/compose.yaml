@@ -11,14 +11,12 @@ services:
         mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary
         chmod 0755 /srv/jamf-store /srv/jamf-store/packages
         chmod 0700 /srv/jamf-store/.temporary
-        chown -R 65532:65532 /srv/jamf-store
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
-      - CHOWN
       - FOWNER
     volumes:
       - package-store:/srv/jamf-store
@@ -30,6 +28,10 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: cache-helper
+    # Docker Desktop can reject cross-UID chown on named volumes. The macOS
+    # test helper therefore uses volume-owner UID 0 with all capabilities
+    # dropped; the production profile remains non-root.
+    user: "0:0"
     depends_on:
       store-init:
         condition: service_completed_successfully

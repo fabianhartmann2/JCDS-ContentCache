@@ -82,6 +82,13 @@ configuration copied into it. This avoids Docker Desktop failures while reading
 a single-file bind mount from the macOS filesystem. No credential or private
 environment value is copied into either image.
 
+Docker Desktop can also reject cross-UID ownership changes on named volumes.
+For this localhost-only integration profile, the helper therefore runs as UID 0
+inside its container while retaining `cap_drop: ALL`, a read-only root
+filesystem and `no-new-privileges`. Only the Docker-managed package volume is
+writable. The production profile remains non-root and is not affected by this
+macOS compatibility setting.
+
 Wait for readiness:
 
 ```bash

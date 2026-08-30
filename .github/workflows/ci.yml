@@ -63,6 +63,9 @@ jobs:
           docker compose --file deploy/macos/compose.yaml config --quiet
           docker compose --file deploy/macos/compose.yaml build nginx
           docker compose --file deploy/macos/compose.yaml run --rm --no-deps store-init
+          docker compose --file deploy/macos/compose.yaml run --rm --no-deps \
+            --entrypoint /bin/sh cache-helper -eu -c \
+            'test "$(id -u)" -eq 0; temporary=/srv/jamf-store/.temporary/ci-write; final=/srv/jamf-store/packages/ci-write; : >"${temporary}"; mv "${temporary}" "${final}"; rm "${final}"'
           docker compose --file deploy/macos/compose.yaml down --volumes --remove-orphans
           docker run --rm \
             --read-only \
