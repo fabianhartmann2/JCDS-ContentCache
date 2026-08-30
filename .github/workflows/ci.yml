@@ -59,6 +59,16 @@ jobs:
       - name: Validate macOS real-backend profile
         env:
           JCDS_MAC_HELPER_ENV_FILE: ${{ github.workspace }}/deploy/macos/cache-helper.real.env.example
-        run: docker compose --file deploy/macos/compose.yaml config --quiet
+        run: |
+          docker compose --file deploy/macos/compose.yaml config --quiet
+          docker compose --file deploy/macos/compose.yaml build nginx
+          docker run --rm \
+            --read-only \
+            --add-host cache-helper:127.0.0.1 \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=64m \
+            --tmpfs /var/run:rw,noexec,nosuid,size=8m \
+            --entrypoint nginx \
+            jcds-content-cache-nginx:macos-real-test \
+            -t
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

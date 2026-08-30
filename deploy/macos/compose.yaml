@@ -63,10 +63,14 @@ services:
       - backend
 
   nginx:
-    image: nginx:1.30.4-alpine
+    image: jcds-content-cache-nginx:macos-real-test
+    build:
+      context: ../..
+      dockerfile: deploy/macos/nginx.Dockerfile
     depends_on:
       cache-helper:
         condition: service_healthy
+    entrypoint: ["nginx", "-g", "daemon off;"]
     init: true
     read_only: true
     security_opt:
@@ -83,10 +87,6 @@ services:
     ports:
       - "${JCDS_MAC_LISTEN_IP:-127.0.0.1}:${JCDS_MAC_LISTEN_PORT:-8443}:8080/tcp"
     volumes:
-      - type: bind
-        source: ../nginx/nginx.dev.conf
-        target: /etc/nginx/nginx.conf
-        read_only: true
       - type: volume
         source: package-store
         target: /srv/jamf-store

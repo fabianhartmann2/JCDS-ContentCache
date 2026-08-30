@@ -77,6 +77,11 @@ docker compose \
   ps
 ```
 
+The macOS profile builds a small local NGINX image with the public development
+configuration copied into it. This avoids Docker Desktop failures while reading
+a single-file bind mount from the macOS filesystem. No credential or private
+environment value is copied into either image.
+
 Wait for readiness:
 
 ```bash
