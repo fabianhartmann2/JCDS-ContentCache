@@ -62,6 +62,8 @@ jobs:
         run: |
           docker compose --file deploy/macos/compose.yaml config --quiet
           docker compose --file deploy/macos/compose.yaml build nginx
+          docker compose --file deploy/macos/compose.yaml run --rm --no-deps store-init
+          docker compose --file deploy/macos/compose.yaml down --volumes --remove-orphans
           docker run --rm \
             --read-only \
             --add-host cache-helper:127.0.0.1 \

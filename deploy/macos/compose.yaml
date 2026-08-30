@@ -19,6 +19,7 @@ services:
       - ALL
     cap_add:
       - CHOWN
+      - FOWNER
     volumes:
       - package-store:/srv/jamf-store
     restart: "no"
