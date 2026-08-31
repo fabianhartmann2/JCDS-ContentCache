@@ -9,7 +9,7 @@ https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
-> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume capacity and recovery qualification, certificate renewal, retention and monitoring ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume recovery qualification, certificate renewal, cleanup acceptance and monitoring ownership remain production gates.
 
 ## Current milestone
 
@@ -88,7 +88,7 @@ Follow [Real-backend test on macOS](docs/macos-real-backend-test.md). Never comm
 
 ## macOS production target
 
-The first production target is a dedicated Mac running Docker Desktop and serving `jcds-cache.appfruit.ch:8443` to any network client able to reach the listener. NGINX and the Go helper continue to run inside Docker Desktop's Linux VM. The existing `deploy/macos/` profile is deliberately bound to localhost and is not the production listener.
+The first production target is a dedicated Mac running Docker Desktop and serving `jcds-cache.appfruit.ch:8443` to any network client able to reach the listener. NGINX, the Go helper and a separate cache-maintainer run inside Docker Desktop's Linux VM. The maintainer records successful package access in a restricted volume and, by default, removes packages inactive for 90 days only when free space falls below 30 percent, stopping at 35 percent. These settings are configurable without rebuilding. The existing `deploy/macos/` profile is deliberately bound to localhost and is not the production listener.
 
 The macOS production candidate is defined in `deploy/macos-production/` with a baked TLS-enabled NGINX configuration, named-volume storage, private helper networking and hardened containers. Package administration from macOS through Docker or purpose-built commands satisfies the visibility requirement. A live LAN test proved that Docker Desktop replaces the original source with `192.168.65.1`; source-CIDR filtering was therefore removed by explicit service-owner decision. Server-authenticated TLS protects transport but does not authorize clients. An organization-approved paid Docker Desktop entitlement is available. The package store remains derived and rebuildable from JCDS.
 

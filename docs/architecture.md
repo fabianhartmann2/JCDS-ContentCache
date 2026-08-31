@@ -76,9 +76,11 @@ storage. This matches the storage model already proven by the real-backend test
 and avoids making production depend on the bind-mount path that previously
 exposed I/O and ownership failures.
 
-The store targets an approximately 500–600 GB package working set, retains at
-least 30 percent free space, and keeps temporary and final paths in the same
-named volume for atomic rename. Package inventory, inspection and cleanup must be
+The store targets an approximately 500–600 GB package working set. A separate
+hardened maintainer uses a restricted access index and configurable defaults of
+90 days inactivity, cleanup below 30 percent free space and recovery to 35
+percent. Temporary and final paths remain in the same named volume for atomic
+rename. Package inventory, inspection and cleanup must be
 available from macOS through supported Docker commands or purpose-built
 administrative commands. A named volume does not make its files directly
 browsable as ordinary Finder files; the service owner has confirmed that

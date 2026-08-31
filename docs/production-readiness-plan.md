@@ -99,34 +99,44 @@ Desktop settings and measured package distribution.
 The selected policy is conditional cleanup:
 
 1. Trigger cleanup when package-store free space falls below 30 percent.
-2. Consider only completed package files not requested for `X` days; `X`
-   remains an explicit open decision.
+2. Consider only completed package files not requested for 90 days by default.
 3. Delete eligible files in oldest-last-access order.
 4. Stop after free space reaches a recovery target above the trigger; the
-   recommended starting target is 35 percent.
+   default target is 35 percent.
 5. Never delete active `.part` files, unrelated files, symbolic links or files
    involved in an active fill.
 6. If no eligible file remains, reject new fills through existing capacity
    protection rather than breaching the free-space floor. Local files remain
    available.
 
+All lifecycle values are deployment-time settings. The defaults are
+`JCDS_CACHE_RETENTION=2160h`,
+`JCDS_CACHE_CLEANUP_TRIGGER_FREE_PERCENT=30` and
+`JCDS_CACHE_CLEANUP_TARGET_FREE_PERCENT=35`; changing them does not require an
+image rebuild.
+
 Filesystem `atime` is not an acceptable source of truth: Docker and filesystem
 mount behavior may suppress or coarsen access-time updates, and NGINX `sendfile`
 does not provide a portable last-access contract. Accurate retention therefore
-requires a local access index.
+uses a local access index.
 
-Planned implementation:
+Implemented design:
 
 - retain the privacy-safe standard NGINX log on stdout without package names;
-- write a separate, local-only maintenance access journal containing canonical
-  filename and timestamp;
-- store that journal/index in a restricted maintenance volume, never in normal
-  centralized request logs;
-- have a purpose-built cleanup command/service consume the index, validate each
-  candidate with `Lstat`, coordinate with active fills and remove only eligible
-  regular completed files;
-- define retention, rotation and permissions for the maintenance index before
-  enabling automatic deletion.
+- send successful `200` and `206` package-access events over internal UDP
+  syslog to the `cache-maintainer` service;
+- store canonical filename and last-access time in a mode-`0600` index in a
+  separate restricted maintenance volume, never in normal centralized logs;
+- have `cache-maintainer` validate candidates with `Lstat` and remove only
+  eligible regular completed `.pkg` files;
+- keep filename-bearing deletion audit records only in the restricted
+  maintenance volume;
+- flush the index every 30 seconds and check capacity every 15 minutes by
+  default; both intervals are configurable.
+
+The private UDP event stream is best effort. A lost event can cause rebuildable
+cache data to be evicted early, but cannot modify the authoritative Jamf source.
+Controlled disk-pressure acceptance remains required before pilot approval.
 
 Administrative inventory and ad-hoc deletion commands are deferred because the
 service owner does not currently require them. Automatic cleanup will still
@@ -175,7 +185,7 @@ against an unresolved project or volume target.
 | ID | Decision or evidence still required |
 |---|---|
 | OQ-16 | Implement LaunchAgent controller and pass cold-boot-to-HTTPS recovery |
-| OQ-07 | Choose inactivity window `X` and approve 30% trigger / 35% target |
+| OQ-07 | Validate configurable 90-day retention and 30%/35% thresholds under controlled disk pressure |
 | OQ-17 | Validate final disk sizing, macOS reboot, Docker update and volume recovery |
 | OQ-19 | Record service-owner Docker resource and update settings |
 | OQ-20 | Exercise empty-volume recovery and accept rebuild without package backup |

@@ -155,7 +155,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Add a host-specific Compose definition, NGINX TLS configuration, environment templates, certificate check and deployment/rollback runbook.
 - [ ] Issue the initial certificate through manual DNS validation and establish an automated renewal method before production approval.
 - [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
-- [ ] Configure capacity thresholds, retention and administrative cleanup procedures.
+- [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
+- [ ] Exercise cleanup under controlled disk pressure and record operator acceptance evidence.
 - [ ] Connect logs, metrics and alerts to the selected monitoring platform.
 - [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
 - [ ] Add backup/rebuild expectations and a tested disaster-recovery procedure.
@@ -209,7 +210,7 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
-| OQ-07 | Store capacity and retention | High | IN REVIEW | Plan 500–600 GB cache; cleanup below 30% free, oldest inactive first, recover to 35% | Choose inactivity window `X`; implement restricted last-access index and safe cleanup |
+| OQ-07 | Store capacity and retention | High | ACCEPTANCE PENDING | Configurable 90-day default; cleanup below 30% free, oldest inactive first, recover to 35%; restricted access index and audit | Run controlled disk-pressure acceptance test |
 | OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS without source-CIDR filtering or client authentication | Explicitly accepted route-reachable access and package exposure |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
@@ -304,7 +305,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 
 ## 10. Immediate next actions
 
-1. Choose retention inactivity window `X` and implement the restricted last-access index plus conditional cleanup.
+1. Validate configurable 90-day retention and conditional cleanup under controlled disk pressure.
 2. Record the service-owner Docker Desktop settings and implement/test empty-volume recovery.
 3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.

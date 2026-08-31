@@ -41,7 +41,7 @@ if grep -q 'allow 192\.168\.0\.0/16' "${repository_root}/deploy/macos-production
   exit 1
 fi
 
-docker compose --file "${compose_file}" build nginx cache-helper
+docker compose --file "${compose_file}" build nginx cache-helper cache-maintainer
 docker compose --file "${compose_file}" run --rm --no-deps store-init
 
 docker compose --file "${compose_file}" run --rm --no-deps \
@@ -54,6 +54,14 @@ docker compose --file "${compose_file}" run --rm --no-deps \
     mv "${temporary}" "${final}"
     test -f "${final}"
     rm "${final}"
+  '
+
+docker compose --file "${compose_file}" run --rm --no-deps \
+  --entrypoint /bin/sh cache-maintainer -eu -c '
+    test "$(id -u)" -eq 65532
+    test "$(id -g)" -eq 0
+    test -w /srv/jamf-store/packages
+    test -w /srv/jamf-maintenance
   '
 
 # Start the actual non-root helper so its Store.New path proves that a
@@ -88,6 +96,7 @@ docker run --rm \
   --cap-add SETGID \
   --cap-add SETUID \
   --add-host cache-helper:127.0.0.1 \
+  --add-host cache-maintainer:127.0.0.1 \
   --mount "type=bind,source=${tls_directory},target=/etc/nginx/tls,readonly" \
   --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=64m \
   --tmpfs /var/run:rw,noexec,nosuid,size=8m \
@@ -95,4 +104,4 @@ docker run --rm \
   "jcds-content-cache-nginx:${JCDS_MAC_PROD_IMAGE_TAG}" \
   nginx -t
 
-echo "macOS production profile smoke test passed: Compose, non-root volume writes, baked NGINX, and TLS paths are valid."
+echo "macOS production profile smoke test passed: Compose, non-root helper/maintainer volume writes, baked NGINX, and TLS paths are valid."

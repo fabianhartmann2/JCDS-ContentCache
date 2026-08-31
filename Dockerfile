@@ -6,6 +6,7 @@ COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cache-helper ./cmd/cache-helper \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cache-maintainer ./cmd/cache-maintainer \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mock-upstream ./cmd/mock-upstream
 
 FROM alpine:3.21 AS runtime-base
@@ -24,3 +25,9 @@ COPY --from=build /out/cache-helper /usr/local/bin/cache-helper
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/cache-helper"]
+
+FROM runtime-base AS cache-maintainer
+COPY --from=build /out/cache-maintainer /usr/local/bin/cache-maintainer
+USER 65532:65532
+EXPOSE 5514/udp 8082
+ENTRYPOINT ["/usr/local/bin/cache-maintainer"]

@@ -8,10 +8,11 @@ services:
       - -eu
       - -c
       - |
-        mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary
+        mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary /srv/jamf-maintenance
         chmod 0755 /srv/jamf-store
         chmod 0775 /srv/jamf-store/packages
         chmod 0770 /srv/jamf-store/.temporary
+        chmod 0770 /srv/jamf-maintenance
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -21,6 +22,7 @@ services:
       - FOWNER
     volumes:
       - package-store:/srv/jamf-store
+      - maintenance-store:/srv/jamf-maintenance
     restart: "no"
 
   cache-helper:
@@ -67,6 +69,50 @@ services:
     networks:
       - backend
 
+  cache-maintainer:
+    image: jcds-content-cache-maintainer:${JCDS_MAC_PROD_IMAGE_TAG:-production}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: cache-maintainer
+    user: "65532:0"
+    depends_on:
+      store-init:
+        condition: service_completed_successfully
+    environment:
+      CACHE_RETENTION: ${JCDS_CACHE_RETENTION:-2160h}
+      CACHE_CLEANUP_INTERVAL: ${JCDS_CACHE_CLEANUP_INTERVAL:-15m}
+      CACHE_CLEANUP_TRIGGER_FREE_PERCENT: ${JCDS_CACHE_CLEANUP_TRIGGER_FREE_PERCENT:-30}
+      CACHE_CLEANUP_TARGET_FREE_PERCENT: ${JCDS_CACHE_CLEANUP_TARGET_FREE_PERCENT:-35}
+      ACCESS_INDEX_FLUSH_INTERVAL: ${JCDS_ACCESS_INDEX_FLUSH_INTERVAL:-30s}
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 256m
+    restart: unless-stopped
+    volumes:
+      - package-store:/srv/jamf-store
+      - maintenance-store:/srv/jamf-maintenance
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8082/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    networks:
+      - backend
+
   nginx:
     image: jcds-content-cache-nginx:${JCDS_MAC_PROD_IMAGE_TAG:-production}
     build:
@@ -74,6 +120,8 @@ services:
       dockerfile: deploy/macos-production/nginx.Dockerfile
     depends_on:
       cache-helper:
+        condition: service_healthy
+      cache-maintainer:
         condition: service_healthy
     entrypoint: ["nginx", "-g", "daemon off;"]
     init: true
@@ -129,3 +177,4 @@ networks:
 
 volumes:
   package-store:
+  maintenance-store:
