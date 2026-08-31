@@ -31,7 +31,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Host baseline | Dedicated Mac on a supported macOS release; exact hardware and resources remain open |
 | Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
 | Client access | Server-authenticated TLS and source CIDR `192.168.0.0/16`; no additional v1 client authentication |
-| Package-store mount | Finder-visible APFS host directory bind-mounted at `/srv/jamf-store`; production qualification pending |
+| Package-store mount | Docker named volume at `/srv/jamf-store`; macOS administrative visibility and production qualification pending |
 | DNS and certificate | Manual DNS records and an initial certificate obtained through manual DNS validation; unattended renewal remains a production gate |
 | Secret delivery | Root-owned host environment file, mode `0600`, passed to the helper by Docker Compose |
 | Outbound network | Direct HTTPS; no proxy or TLS inspection |
@@ -151,7 +151,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 **Goal:** Deploy a controlled production candidate using real enterprise services.
 
-- [ ] Provision the dedicated Mac, managed Docker Desktop, persistent storage, DNS, macOS/perimeter firewall and egress rules.
+- [ ] Provision the dedicated Mac, managed Docker Desktop, persistent storage, DNS, NGINX source-CIDR enforcement and egress rules.
 - [x] Add a host-specific Compose definition, NGINX TLS configuration, environment templates, certificate check and deployment/rollback runbook.
 - [ ] Issue the initial certificate through manual DNS validation and establish an automated renewal method before production approval.
 - [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
@@ -216,9 +216,9 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
 | OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
-| OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | User-confirmed free-tier eligibility | Record review; reassess when organizational eligibility changes |
+| OQ-15 | Docker Desktop licensing | Blocking | BLOCKED | Free tier requested but ineligible for enterprise production use | Obtain approved paid entitlement or change runtime architecture |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | Dedicated account; fully automatic recovery required | Startup mechanism plus cold-boot and update-recovery evidence |
-| OQ-17 | Production storage backing | Blocking | IN REVIEW | Finder-visible APFS bind mount at `/srv/jamf-store` | Large-file, atomicity, permission, restart, reboot, update and `EIO` qualification |
+| OQ-17 | Production storage backing | Blocking | RESOLVED | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient | Qualify sizing, atomicity, permissions, restart, reboot and recovery |
 | OQ-18 | NGINX access enforcement/client IP | Blocking | IN REVIEW | No firewall; NGINX enforces `192.168.0.0/16` | Allowed/denied LAN test proving trustworthy source visibility |
 | OQ-19 | Docker Desktop resources and updates | High | OPEN | Disable Resource Saver and manage fixed resources/maintenance windows | Managed settings and update ownership |
 | OQ-20 | Cache backup/rebuild policy | Medium | OPEN | Rebuild package bytes from JCDS; protect configuration and certificates | Recovery owner and empty-cache recovery test |

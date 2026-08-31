@@ -37,9 +37,9 @@ The existing profiles have different purposes:
 Implementation of the production Compose profile requires answers for:
 
 1. Mac model, Apple silicon generation, RAM, storage and network interface.
-2. Docker Desktop subscription entitlement and operational owner.
+2. Organization-approved paid Docker Desktop entitlement and operational owner; free-tier use is not eligible for this enterprise production workload.
 3. Dedicated macOS account and unattended restart/session model.
-4. APFS bind-mount qualification and capacity evidence.
+4. Named-volume capacity/recovery evidence and confirmation of the required macOS visibility semantics.
 5. NGINX source-address visibility and allowed/denied LAN evidence.
 6. Production helper UID model for the selected storage implementation.
 
@@ -52,9 +52,9 @@ The approved host baseline is:
 
 - Dedicated wired Apple-silicon Mac mini.
 - 24 GB RAM and 1 TB APFS storage.
-- A Finder-visible APFS package directory with at least 20 percent operational
-  headroom; actual usable cache capacity must account for macOS, images, logs
-  and temporary in-progress downloads.
+- A Docker named volume in Docker Desktop's disk image, with at least 20 percent
+  operational headroom; actual usable cache capacity must account for macOS,
+  images, logs and temporary in-progress downloads.
 - Static address or DHCP reservation and stable DNS/time synchronization.
 - Supported macOS release managed through MDM.
 - Sleep and automatic power-off disabled for the always-on service.
@@ -67,11 +67,14 @@ The service owner must keep the host within that support window:
 
 ## Docker Desktop governance
 
-The user has confirmed that Docker Desktop's free tier applies to this
-deployment. That eligibility must be recorded by the service owner and
-rechecked if organizational size, revenue, ownership or usage changes. Docker
-Desktop currently requires a paid subscription for professional use in larger
-organizations. Settings management and updates still need named owners:
+The requested free-tier Docker Desktop use is not eligible for this enterprise
+production workload. Docker's published terms allow free commercial use only
+for small businesses with fewer than 250 employees and less than USD 10 million
+in annual revenue; professional use in larger organizations requires a paid
+subscription. An organization-approved paid entitlement and named operational
+owner are production blockers. If that entitlement cannot be provided, the
+runtime architecture must be changed before production. Settings management
+and updates also need named owners:
 
 - <https://docs.docker.com/subscription/desktop-license/>
 - <https://docs.docker.com/enterprise/security/enforce-sign-in/>
@@ -114,27 +117,33 @@ approved macOS session and management model:
 
 ## Package-store selection
 
-### Selected option — dedicated APFS bind mount
+### Selected option — Docker named volume
 
-Production requires package files to be directly visible in Finder, so a
-dedicated host APFS directory will be bind-mounted at `/srv/jamf-store`.
-Docker-managed named volumes are not acceptable for this requirement because
-their files are managed inside Docker Desktop rather than exposed as normal
-host files.
+Production uses a Docker named volume mounted at `/srv/jamf-store`. Docker
+Desktop manages its files inside the Linux VM disk image, whose host location
+resides on APFS storage. This is the model proven by the macOS real-backend
+test and avoids the bind-mount I/O and cross-UID ownership failures already
+observed during that test.
 
-The bind mount is selected but is not approved for pilot use until testing proves:
+The package files are therefore not directly browsable in Finder. They can be
+listed, inspected, exported, pre-populated and removed from macOS through
+Docker commands or purpose-built administrative commands. The service owner
+has confirmed that this satisfies the macOS visibility requirement; native
+Finder visibility is not required.
+
+The named volume is not approved for pilot use until testing proves:
 
 - sustained large-file throughput;
 - same-filesystem atomic rename;
 - stable permissions across containers and reboots;
-- no `EIO` or file-sharing failures;
+- correct Docker Desktop disk-image sizing and APFS free-space monitoring;
 - behaviour across Docker Desktop and macOS updates;
-- safe host-side pre-population and cleanup.
+- safe macOS-initiated inventory, pre-population, export and cleanup.
 
 The qualification must use representative multi-gigabyte packages, concurrent
 readers, an interrupted fill, container recreation, Docker Desktop restart,
 macOS reboot and a controlled Docker Desktop update. It must also verify that
-`.temporary` and `packages` reside on the same APFS filesystem and that only an
+`.temporary` and `packages` reside in the same Docker volume and that only an
 atomic rename makes a completed package visible.
 
 The selected implementation must retain `/srv/jamf-store` as the internal
@@ -235,7 +244,7 @@ name, URI, query, raw range, raw user agent, credentials or signed URL.
 1. Close the remaining evidence and policy gates in OQ-16 through OQ-21 and approve the architecture.
 2. Implement and review `deploy/macos-production/`.
 3. Build and test the selected ARM64 images in CI and on the target Mac.
-4. Configure DNS, certificate, firewall, storage and protected secret delivery.
+4. Configure DNS, certificate, NGINX access policy, storage and protected secret delivery.
 5. Prove cold-boot recovery and controlled update/restart behavior.
 6. Validate allowed and denied LAN clients plus TLS trust.
 7. Run real miss, local hit, range, restart, upstream-outage, disk-low and

@@ -132,7 +132,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Permit source CIDR `192.168.0.0/16`; no additional client authentication is required for v1.                                                                               | Resolved            |
-| Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Finder-visible APFS host-directory bind mount; production qualification remains mandatory.                          | In review           |
+| Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Docker named volume in Docker Desktop's APFS-backed disk image; Docker/administrative access from macOS satisfies the visibility requirement. | Resolved            |
 | Secret delivery        | Pass the Jamf client secret through a root-owned mode-`0600` host environment file outside Git.                                                                             | Resolved            |
 | DNS and certificate    | Use manual DNS records and manual DNS validation for initial certificate issuance; expiry monitoring is mandatory and unattended renewal remains a production gate.          | Pilot decision      |
 | Outbound network       | Connect directly over validated HTTPS without an outbound proxy or TLS inspection.                                                                                          | Resolved            |
@@ -777,20 +777,22 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Use a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage.
 - **Required follow-up:** Confirm the Apple silicon generation and prove that usable package capacity retains 20 percent operational headroom after macOS, Docker, images, logs and temporary downloads.
 
-#### OQ-15 — Docker Desktop licensing (RESOLVED)
+#### OQ-15 — Docker Desktop licensing (BLOCKED)
 
-- **Decision:** The user confirms Docker Desktop free-tier eligibility applies.
-- **Required follow-up:** Record the eligibility review and reassess it if organizational size, revenue, ownership or usage changes. Update ownership remains under OQ-19.
+- **Requested position:** Use Docker Desktop under the free tier.
+- **Constraint:** Docker's published terms limit free commercial use to small businesses with fewer than 250 employees **and** less than USD 10 million in annual revenue. Professional use in larger organizations requires a paid subscription. This enterprise production workload is therefore not eligible for the free tier.
+- **Decision required:** Obtain and record an organization-approved paid Docker entitlement, or select a production runtime architecture that does not depend on Docker Desktop. Name the owner for licensing, sign-in, updates and support.
 
 #### OQ-16 — Unattended startup and session model (IN REVIEW)
 
 - **Decision:** Use a dedicated macOS account. Fully automatic recovery is mandatory.
 - **Required follow-up:** Select the login/startup mechanism and demonstrate power-on-to-healthy recovery, including FileVault, Docker Desktop startup, Compose startup and failure alerting, without manual interaction.
 
-#### OQ-17 — Production storage backing (IN REVIEW)
+#### OQ-17 — Production storage backing and macOS visibility (RESOLVED)
 
-- **Decision:** Use a dedicated APFS host directory bind-mounted at `/srv/jamf-store`, with completed packages directly visible in Finder.
-- **Required follow-up:** Pass the bind-mount qualification suite for large-file throughput, atomic rename, permissions, interruption, restart, reboot, update, host-side access and absence of `EIO`; retain 20 percent free-space headroom.
+- **Decision:** Use a Docker named volume at `/srv/jamf-store`, backed by Docker Desktop's disk image on managed APFS storage. Provide package inventory and management from macOS through Docker or purpose-built administrative commands.
+- **Clarification:** Docker/administrative access from macOS satisfies the visibility requirement; native Finder browsing is not required.
+- **Required follow-up:** Qualify disk sizing, atomic rename, permissions, interruption, restart, reboot, update and recovery; retain 20 percent free-space headroom.
 
 #### OQ-18 — NGINX access enforcement and client-address visibility (IN REVIEW)
 
@@ -827,7 +829,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
 | D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
 | D-10   | Host profile           | Dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage, Docker Desktop and a dedicated service account; automatic recovery remains to be demonstrated. |
-| D-15   | macOS storage          | Use a Finder-visible APFS bind mount for the package store, subject to mandatory Docker Desktop reliability qualification. |
+| D-15   | macOS storage          | Use a Docker named volume in Docker Desktop's APFS-backed VM disk image; Docker/administrative access from macOS satisfies the visibility requirement. |
 | D-16   | Runtime identity       | Prefer non-root; UID 0 requires explicit approval and the constrained security model defined by OQ-21. |
 | D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` and permit `192.168.0.0/16`; no additional v1 client authentication.                                                       |
 | D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |

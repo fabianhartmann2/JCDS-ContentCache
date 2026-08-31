@@ -70,20 +70,19 @@ representation backing that container path is a separate production decision.
 
 ## 5. Storage architecture
 
-Production will use a dedicated APFS host directory bind-mounted at
-`/srv/jamf-store`, so completed packages remain directly visible in Finder
-under their original filenames. The store must provide 500 GB–1 TB usable
-capacity, retain at least 20 percent headroom, and keep temporary and final
-paths on the same APFS filesystem for atomic rename.
+Production will use a Docker named volume at `/srv/jamf-store`. Docker Desktop
+stores that volume inside its managed Linux VM disk image on APFS-backed Mac
+storage. This matches the storage model already proven by the real-backend test
+and avoids making production depend on the bind-mount path that previously
+exposed I/O and ownership failures.
 
-This choice is conditional on a qualification test. Earlier Docker Desktop
-testing exposed bind-mount I/O and ownership failures, while the named-volume
-profile succeeded. Production acceptance must therefore prove sustained
-large-file streaming, same-filesystem atomic publication, stable permissions,
-restart and update survival, host-side inspection/pre-population, and absence
-of `EIO` failures. If it fails, the architecture decision must be reopened;
-silently falling back to Docker's VM disk image would violate the Finder-visible
-requirement.
+The store must provide 500 GB–1 TB usable capacity, retain at least 20 percent
+headroom, and keep temporary and final paths in the same named volume for atomic
+rename. Package inventory, inspection, pre-population and cleanup must be
+available from macOS through supported Docker commands or purpose-built
+administrative commands. A named volume does not make its files directly
+browsable as ordinary Finder files; the service owner has confirmed that
+Docker/administrative access from macOS satisfies the visibility requirement.
 
 ## 6. Availability and lifecycle
 
@@ -116,9 +115,9 @@ server platform.
 | AD-06 | Package names are immutable and publication requires exact catalog length and SHA3-512 verification. |
 | AD-07 | The current `deploy/macos/` stack remains a localhost integration profile, not the production listener. |
 | AD-08 | The host is a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage. |
-| AD-09 | Docker Desktop free-tier applicability is user-confirmed; entitlement must be rechecked if organizational eligibility changes. |
+| AD-09 | Use the standard Docker Desktop product only if an organization-approved paid entitlement is provided; Docker Desktop free-tier use is not eligible for this enterprise production workload. |
 | AD-10 | Docker Desktop runs under a dedicated macOS account and fully automatic recovery must be demonstrated. |
-| AD-11 | Production package storage is a Finder-visible APFS bind mount, subject to the mandatory qualification suite. |
+| AD-11 | Production package storage uses a Docker named volume in Docker Desktop's APFS-backed VM disk image. |
 | AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
 
 ## 8. Blocking production decisions
@@ -126,12 +125,13 @@ server platform.
 | ID | Decision required | Recommended starting position |
 |---|---|---|
 | OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
-| OQ-17 | APFS bind-mount qualification evidence | Finder-visible APFS directory selected; pass the mandatory reliability and performance suite |
+| OQ-15 | Docker Desktop production entitlement | Obtain an organization-approved paid Docker subscription or select a non-Docker-Desktop runtime architecture |
 | OQ-18 | Docker Desktop source-address visibility | No firewall selected; prove NGINX sees and rejects the real disallowed LAN source before relying on it |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
 | OQ-20 | Cache backup/rebuild and Docker Desktop disaster recovery | Treat package bytes as rebuildable; back up only configuration/certificates and test empty-cache recovery |
 | OQ-21 | Storage permission evidence for the selected identity | Prefer non-root; UID 0 is allowed only after explicit approval with all capabilities dropped and a read-only root filesystem |
 
-Implementation of `deploy/macos-production/` may begin. OQ-16 through OQ-18
-and OQ-21 now have selected directions but require acceptance evidence before
-the production pilot. OQ-19 and OQ-20 must also be resolved before that pilot.
+Implementation of `deploy/macos-production/` may begin for engineering and
+validation, but it must not be approved for production while OQ-15 remains
+blocked. OQ-16, OQ-18 and OQ-21 have selected directions but require acceptance
+evidence before the pilot. OQ-19 and OQ-20 must also be resolved before it.
