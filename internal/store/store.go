@@ -291,6 +291,10 @@ func isASCIIAlphanumeric(character byte) bool {
 }
 
 func ensureDirectory(path string, permissions os.FileMode) error {
+	return ensureDirectoryWith(path, permissions, os.Chmod)
+}
+
+func ensureDirectoryWith(path string, permissions os.FileMode, chmod func(string, os.FileMode) error) error {
 	if err := os.MkdirAll(path, permissions); err != nil {
 		return err
 	}
@@ -301,7 +305,38 @@ func ensureDirectory(path string, permissions os.FileMode) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("path is not a real directory")
 	}
-	return os.Chmod(path, permissions)
+	if err := chmod(path, permissions); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EPERM) {
+		return err
+	}
+
+	// A platform initializer may own a pre-provisioned volume directory while
+	// granting this non-root process access through its group. Docker Desktop
+	// can reject chmod by that process even when the effective permissions are
+	// already safe and writable. Accept only that EPERM case after validating
+	// the actual mode and a create/remove probe; other chmod failures remain
+	// fatal.
+	info, err = os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if permissions&0o007 == 0 && info.Mode().Perm()&0o007 != 0 {
+		return fmt.Errorf("directory permissions %04o expose a private path", info.Mode().Perm())
+	}
+	probe, err := os.CreateTemp(path, ".write-check-*")
+	if err != nil {
+		return fmt.Errorf("directory mode cannot be enforced and path is not writable: %w", err)
+	}
+	probePath := probe.Name()
+	if closeErr := probe.Close(); closeErr != nil {
+		_ = os.Remove(probePath)
+		return fmt.Errorf("close directory write probe: %w", closeErr)
+	}
+	if err := os.Remove(probePath); err != nil {
+		return fmt.Errorf("remove directory write probe: %w", err)
+	}
+	return nil
 }
 
 func sameFilesystem(first, second string) (bool, error) {

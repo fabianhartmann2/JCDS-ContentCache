@@ -50,6 +50,30 @@ docker compose --file "${compose_file}" run --rm --no-deps \
     rm "${final}"
   '
 
+# Start the actual non-root helper so its Store.New path proves that a
+# pre-provisioned, group-writable Docker volume is accepted even when chmod is
+# rejected for the non-owner UID.
+docker compose --file "${compose_file}" up --detach cache-helper
+for _ in $(seq 1 30); do
+  helper_health="$(
+    docker compose --file "${compose_file}" ps \
+      --format json cache-helper \
+      | grep -o '"Health":"[^"]*"' \
+      | head -n 1 \
+      | cut -d '"' -f 4 \
+      || true
+  )"
+  if [[ "${helper_health}" == "healthy" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ "${helper_health:-}" != "healthy" ]]; then
+  docker compose --file "${compose_file}" logs --no-color cache-helper >&2
+  echo "Production helper did not become healthy" >&2
+  exit 1
+fi
+
 docker run --rm \
   --read-only \
   --cap-drop ALL \

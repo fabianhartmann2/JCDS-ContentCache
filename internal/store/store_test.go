@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -184,5 +186,54 @@ func TestOpenRejectsSymlinkWithoutFollowingIt(t *testing.T) {
 	}
 	if err == nil || errors.Is(err, ErrNotFound) {
 		t.Fatalf("Open() error = %v, want a non-regular-file rejection", err)
+	}
+}
+
+func TestEnsureDirectoryAcceptsWritablePreprovisionedDirectoryWhenChmodIsNotPermitted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages")
+	if err := os.Mkdir(path, 0o775); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	err := ensureDirectoryWith(path, 0o755, func(string, os.FileMode) error {
+		return syscall.EPERM
+	})
+	if err != nil {
+		t.Fatalf("ensureDirectoryWith() error = %v", err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("write probe was not removed: %v", entries)
+	}
+}
+
+func TestEnsureDirectoryRejectsWorldAccessiblePrivateDirectoryWhenChmodIsNotPermitted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "temporary")
+	if err := os.Mkdir(path, 0o777); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	if err := os.Chmod(path, 0o777); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	err := ensureDirectoryWith(path, 0o700, func(string, os.FileMode) error {
+		return syscall.EPERM
+	})
+	if err == nil || !strings.Contains(err.Error(), "expose a private path") {
+		t.Fatalf("ensureDirectoryWith() error = %v, want private-path rejection", err)
+	}
+}
+
+func TestEnsureDirectoryDoesNotIgnoreOtherChmodErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages")
+	want := errors.New("synthetic chmod failure")
+	err := ensureDirectoryWith(path, 0o755, func(string, os.FileMode) error {
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("ensureDirectoryWith() error = %v, want %v", err, want)
 	}
 }
