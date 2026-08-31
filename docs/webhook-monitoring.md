@@ -55,6 +55,9 @@ current production image.
 | `METRICS_INSTANCE_FQDN` | empty | Client-facing FQDN |
 | `METRICS_PACKAGE_INVENTORY` | `summary` | `none`, `summary`, or `full` |
 | `METRICS_PACKAGE_INVENTORY_MAX_ITEMS` | `5000` | Hard cap in `full` mode |
+| `METRICS_TLS_CERT_FILE` | empty | Read-only public certificate or full-chain PEM inspected by the reporter |
+| `METRICS_TLS_WARNING_BEFORE` | `720h` | Warning threshold; 30 days by default |
+| `METRICS_TLS_CRITICAL_BEFORE` | `336h` | Critical threshold; 14 days by default |
 
 If no UUID is configured, the maintainer generates one once and stores it with
 mode `0600` in the maintenance volume, for example at
@@ -62,6 +65,14 @@ mode `0600` in the maintenance volume, for example at
 identity. A missing URL, allowlist or required authentication secret while the
 feature is enabled is a startup configuration error for the reporter, but must
 not disable cache delivery or cleanup.
+
+The maintainer receives only the public certificate or full-chain PEM through
+a dedicated read-only mount. It must never receive or mount the TLS private
+key. Warning and critical durations must be positive, and the warning duration
+must be greater than or equal to the critical duration.
+When webhook reporting is enabled, the public certificate path is required.
+Failure to read or parse it after startup must produce an `unknown` TLS status
+in subsequent snapshots rather than stopping reporting, cleanup or delivery.
 
 ## 4. Snapshot contract
 
@@ -86,6 +97,13 @@ unknown fields as forward-compatible additions.
     "ready": true,
     "gateway_status": 200,
     "checked_at": "2026-08-31T10:00:00Z"
+  },
+  "tls": {
+    "subject": "CN=jcds-cache.appfruit.ch",
+    "not_after": "2027-08-31T12:00:00Z",
+    "remaining_seconds": 31536000,
+    "remaining_days": 365,
+    "expiry_status": "ok"
   },
   "storage": {
     "total_bytes": 751619276800,
@@ -141,6 +159,13 @@ a reporting window. `event_id` supports receiver deduplication; `sequence`
 helps detect missed or reordered snapshots. Cleanup result values are
 `not_required`, `target_reached`, `target_not_reached`, and `failed`.
 
+TLS expiry status values are `ok`, `warning`, `critical`, `expired`, and
+`unknown`. `unknown` is used when the configured certificate cannot be read or
+parsed. `remaining_seconds` is authoritative for alert calculations;
+`remaining_days` is a rounded-down operator convenience. The subject is useful
+for human identification, while issuer and serial number are intentionally
+omitted from the baseline payload to keep it compact.
+
 ## 5. Package inventory and privacy
 
 | Mode | Content |
@@ -190,7 +215,9 @@ enterprise platform requires them.
 - abnormal 5xx or incomplete-transfer rate;
 - unsafe filesystem entries, stale temporary files or index inconsistency;
 - unexpected instance UUID change, restart loop or repeated reporter failure;
-- certificate expiry and external HTTPS reachability, measured externally.
+- certificate status `warning`, `critical`, `expired`, or `unknown`;
+- external HTTPS reachability and the certificate actually served by NGINX,
+  measured externally.
 
 ## 8. Acceptance tests
 
@@ -199,14 +226,17 @@ Implementation is complete only after automated and target-Mac evidence proves:
 1. the feature is disabled by default and requires no webhook configuration;
 2. interval, timeout, identity and inventory mode validation fail safely;
 3. the stable UUID survives maintainer and container restart;
-4. a signed snapshot validates at a mock receiver and retries are bounded;
-5. redirects, unapproved hosts, invalid TLS and invalid DNS destinations fail;
-6. receiver outage does not affect readiness, package hits/fills or cleanup;
-7. inventory modes, item caps, truncation and privacy exclusions are enforced;
-8. counters match controlled local-hit, JCDS-fill, range, error and cleanup tests;
-9. payload and reporter logs pass disclosure guards; and
-10. external monitoring distinguishes container self-health from real client
-    reachability.
+4. valid, warning, critical, expired, unreadable and malformed certificate
+   fixtures produce the expected TLS fields without exposing a private key;
+5. a signed snapshot validates at a mock receiver and retries are bounded;
+6. redirects, unapproved hosts, invalid TLS and invalid DNS destinations fail;
+7. receiver outage does not affect readiness, package hits/fills or cleanup;
+8. inventory modes, item caps, truncation and privacy exclusions are enforced;
+9. counters match controlled local-hit, JCDS-fill, range, error and cleanup tests;
+10. payload and reporter logs pass disclosure guards; and
+11. external monitoring distinguishes the mounted-certificate observation from
+    the certificate actually served to a real client and distinguishes
+    container self-health from real client reachability.
 
 ## 9. Remaining decisions
 

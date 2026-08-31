@@ -324,12 +324,14 @@ name, URI, query, raw range, raw user agent, credentials or signed URL.
 The approved future monitoring integration extends the existing
 cache-maintainer with an optional periodic HTTPS webhook reporter. It will send
 stable instance identity, readiness, uptime, storage/cache state, aggregate
-traffic and cleanup outcomes using the privacy-bounded contract in
+traffic, cleanup outcomes and public TLS certificate expiry using the
+privacy-bounded contract in
 `webhook-monitoring.md`. The webhook is disabled by default and is not
 implemented in the current image. Receiver failure must not affect delivery,
 cleanup, readiness or container health. Operators must retain an external HTTPS
-probe because the container cannot prove macOS/Docker Desktop health or actual
-client-network reachability.
+probe because the container cannot prove macOS/Docker Desktop health, actual
+client-network reachability or which certificate NGINX serves. The future
+maintainer mount contains only the public certificate, never its private key.
 
 ## Pilot acceptance sequence
 

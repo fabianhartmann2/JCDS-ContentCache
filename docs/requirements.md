@@ -606,6 +606,11 @@ interval, stable identity, inventory modes, transport controls, failure
 isolation and acceptance tests are defined in
 `docs/webhook-monitoring.md`. The feature is disabled by default. Webhook
 failure must not affect delivery, cleanup, readiness or container health.
+The snapshot must include the configured public TLS certificate's expiration
+time, remaining lifetime and derived `ok`, `warning`, `critical`, `expired` or
+`unknown` status. The maintainer must not receive the TLS private key. An
+external probe must independently validate the certificate actually served by
+NGINX.
 
 - Alert when the service or helper is not ready for longer than the agreed grace period.
 

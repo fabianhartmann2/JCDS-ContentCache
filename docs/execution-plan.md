@@ -162,6 +162,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
 - [ ] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
+- [ ] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
 - [ ] Add exact receiver-host validation, redirect rejection, bounded retry/spooling and the selected HMAC/bearer/mTLS authentication.
 - [ ] Connect webhook snapshots and sanitized logs to the selected monitoring platform.
 - [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
