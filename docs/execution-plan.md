@@ -318,6 +318,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-31 | Jamf path compatibility | Real `/Packages/` miss returned JCDS; lowercase follow-up returned LOCAL with byte-identical content and one shared access index | Complete |
 | 2026-08-31 | Cache lifecycle | Persistent protected access index and isolated conditional cleanup preserved recent files and symlinks while removing only eligible old regular packages | Complete for pilot |
 | 2026-08-31 | Volume recovery | Deleted both labeled volumes in an isolated project, recreated an empty service, rehydrated from JCDS and matched the private pre-deletion hash while production stayed ready | Complete for pilot |
+| 2026-08-31 | Concurrent live fan-out | Target Mac returned `JCDS` to the leader, `INFLIGHT` to a concurrent follower and `LOCAL` after publication; all three outputs were byte-identical | Complete |
 | 2026-08-30 | Real backend | Demonstrated real OAuth/catalog/resolver/JCDS fill, integrity-validated publication and a byte-identical local hit with sanitized NGINX telemetry | Complete |
 
 ## 10. Immediate next actions
