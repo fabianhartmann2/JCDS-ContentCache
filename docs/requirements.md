@@ -4,9 +4,9 @@
 
 **Status:** Draft for technical review
 
-**Version:** 0.7
+**Version:** 0.8
 
-**Date:** 30 August 2026
+**Date:** 31 August 2026
 
 **Owner:** Mac Workplace
 
@@ -731,11 +731,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Configure exact observed hostnames at deployment time, collect more sanitized samples, revalidate each redirect and reject wildcard CloudFront, non-HTTPS and private destinations.
 - **Required by:** Security design
 
-#### OQ-07 — Store retention and size (IMPLEMENTED; ACCEPTANCE PENDING)
+#### OQ-07 — Store retention and size (RESOLVED FOR PILOT)
 
 - **Selected direction:** Plan approximately 500–600 GB usable cache on the 1 TB Mac. Default to a configurable 90-day inactivity window, trigger cleanup below 30 percent free space, delete oldest inactive completed packages first and stop at 35 percent free space.
 - **Implementation:** A hardened `cache-maintainer` maintains a restricted last-access index from internal successful-request events and removes only validated regular final `.pkg` files. Filesystem `atime` is not authoritative. The helper rejects new fills below the same 30-percent floor.
-- **Remaining acceptance:** Exercise controlled disk pressure and confirm index persistence, deletion order, restricted audit and clean refusal when no eligible file can restore the floor.
+- **Acceptance evidence:** On the target Mac, a protected access index survived maintainer restart. An isolated forced-threshold test removed only an eligible old regular package, preserved a recent package and symlink, created a restricted audit, and reported when no eligible candidate could restore the target. Observe real capacity behavior during the pilot.
 - **Required by:** Detailed design
 
 #### OQ-08 — TLS ownership (RESOLVED FOR PILOT)
@@ -805,10 +805,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Disable Resource Saver, allocate fixed resources, prevent uncontrolled production updates and validate health after every macOS or Docker Desktop update.
 - **Required by:** Operations readiness
 
-#### OQ-20 — Cache recovery and backup (OPEN)
+#### OQ-20 — Cache recovery and backup (RESOLVED FOR PILOT)
 
 - **Selected direction:** Treat packages as rebuildable derived data without package-volume backup. Protect configuration, certificates, approved deployment revision and runbooks outside the volume.
-- **Required follow-up:** Exercise deliberate empty-volume recovery: recreate the Compose volume and directory permissions, validate TLS, perform a real fill and repopulate on demand. Suspected corruption requires diagnostics and explicit approval before volume deletion.
+- **Acceptance evidence:** A separately named target-Mac Compose project was filled, its exact labeled package and maintenance volumes were deliberately deleted, and Compose recreated an empty healthy service. Rehydrated bytes matched the private pre-deletion hash, the follow-up request was local, and production remained ready throughout. Suspected corruption still requires diagnostics and explicit approval before volume deletion.
 - **Required by:** Recovery design
 
 #### OQ-21 — Production helper identity (RESOLVED)
@@ -858,7 +858,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 TLS-only service boundary (OQ-06).
 
-4.  Set the SLO and cleanup policy, then close the startup, storage qualification, Docker policy and recovery evidence (OQ-04, OQ-07, OQ-16, OQ-17, OQ-19 and OQ-20).
+4.  Set the SLO, then close the startup, final storage qualification and Docker policy evidence (OQ-04, OQ-16, OQ-17 and OQ-19). OQ-07 and OQ-20 are resolved for the pilot.
 
 5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 

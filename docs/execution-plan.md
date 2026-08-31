@@ -1,9 +1,13 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
-**Status:** Active working plan  
-**Version:** 0.7  
-**Date:** 30 August 2026  
-**Owner:** Mac Workplace  
+**Status:** Active working plan
+
+**Version:** 0.8
+
+**Date:** 31 August 2026
+
+**Owner:** Mac Workplace
+
 **Target:** Production service on one dedicated Mac running Docker Desktop
 
 ## 1. Purpose and working agreement
@@ -159,7 +163,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
 - [ ] Connect logs, metrics and alerts to the selected monitoring platform.
 - [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
-- [ ] Add backup/rebuild expectations and a tested disaster-recovery procedure.
+- [x] Define packages as rebuildable data and pass an isolated destructive empty-volume recovery exercise on the target Mac.
 - [ ] Run a real-tenant smoke test with approved non-sensitive packages.
 - [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
 - [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with privacy-safe monitoring.
@@ -219,10 +223,10 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |
-| OQ-17 | Production storage backing | Blocking | RESOLVED | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient | Qualify sizing, atomicity, permissions, restart, reboot and recovery |
+| OQ-17 | Production storage backing | Blocking | RESOLVED FOR PILOT | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient; atomicity, permissions, restart and destructive recovery passed | Qualify final sizing, macOS reboot and Docker Desktop update behavior |
 | OQ-18 | NGINX access enforcement/client IP | Blocking | RESOLVED | Docker Desktop masks clients as `192.168.65.1`; source filtering removed and unrestricted route-level access accepted | Live LAN evidence captured on 2026-08-31 |
 | OQ-19 | Docker Desktop resources and updates | High | IN REVIEW | Service owner configures settings; Resource Saver remains disabled and updates controlled | Record final values and update owner |
-| OQ-20 | Cache backup/rebuild policy | Medium | IN REVIEW | No package backup; rebuild from JCDS and protect configuration/TLS/runbooks | Pass intentional empty-volume recovery test |
+| OQ-20 | Cache backup/rebuild policy | Medium | RESOLVED FOR PILOT | No package backup; rebuild from JCDS and protect configuration/TLS/private environment files/revision/runbooks; isolated destructive recovery passed | Rehearse after material Docker Desktop storage changes |
 | OQ-21 | Production helper UID model | Blocking | RESOLVED | UID 65532 with primary GID 0 and all capabilities dropped; no UID-0 exception required | Real target-Mac fill, publication, restart and recovery passed |
 
 ## 6. Definition of ready for coding
@@ -237,7 +241,7 @@ Repository scaffolding and mock-driven implementation can begin immediately. Rea
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
 
-Availability, retention and monitoring ownership remain open before production approval. TLS and secret-delivery decisions are fixed for the controlled pilot, while unattended certificate renewal remains an explicit gate.
+Availability and monitoring ownership remain open before production approval. Retention and rebuild policy are resolved for the pilot. TLS and secret-delivery decisions are fixed for the controlled pilot, while unattended certificate renewal remains an explicit gate.
 
 ## 7. Initial repository layout
 
@@ -301,12 +305,15 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-30 | Production target | Replaced Ubuntu/Docker Engine with a dedicated Mac running Docker Desktop; retained the container application architecture and marked Mac operations decisions as blocking | Active |
 | 2026-08-31 | Client access | Live LAN request appeared as Docker gateway `192.168.65.1`; removed ineffective source-CIDR filtering and accepted access by any route-reachable client | Active |
 | 2026-08-31 | macOS production validation | Trusted TLS, real fill, local hit, byte range, restart persistence, helper-outage local availability, controlled miss failure and non-root recovery passed | Complete |
+| 2026-08-31 | Jamf path compatibility | Real `/Packages/` miss returned JCDS; lowercase follow-up returned LOCAL with byte-identical content and one shared access index | Complete |
+| 2026-08-31 | Cache lifecycle | Persistent protected access index and isolated conditional cleanup preserved recent files and symlinks while removing only eligible old regular packages | Complete for pilot |
+| 2026-08-31 | Volume recovery | Deleted both labeled volumes in an isolated project, recreated an empty service, rehydrated from JCDS and matched the private pre-deletion hash while production stayed ready | Complete for pilot |
 | 2026-08-30 | Real backend | Demonstrated real OAuth/catalog/resolver/JCDS fill, integrity-validated publication and a byte-identical local hit with sanitized NGINX telemetry | Complete |
 
 ## 10. Immediate next actions
 
-1. Validate configurable 90-day retention and conditional cleanup under controlled disk pressure.
-2. Record the service-owner Docker Desktop settings and implement/test empty-volume recovery.
-3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
-4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
-5. Implement the LaunchAgent controller and complete the explicitly deferred OQ-16 unattended reboot/session recovery test before pilot approval.
+1. Record the service-owner Docker Desktop resource and update settings.
+2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
+3. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
+4. Select monitoring/alert ownership and certificate-renewal automation.
+5. Implement the LaunchAgent controller and complete the explicitly deferred OQ-16 unattended reboot/session recovery test before final production approval.

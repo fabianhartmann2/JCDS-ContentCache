@@ -14,7 +14,7 @@ NGINX normalizes both internally to the same canonical file; no redirect or
 duplicate cache entry is created.
 
 > [!IMPORTANT]
-> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume recovery qualification, certificate renewal, cleanup acceptance and monitoring ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup and destructive empty-volume recovery are validated for the pilot. Unattended startup, final capacity qualification, certificate renewal and monitoring ownership remain production gates.
 
 ## Current milestone
 

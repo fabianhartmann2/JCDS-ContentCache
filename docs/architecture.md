@@ -128,10 +128,11 @@ server platform.
 |---|---|---|
 | OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
-| OQ-20 | Cache backup/rebuild and Docker Desktop disaster recovery | Treat package bytes as rebuildable; back up only configuration/certificates and test empty-cache recovery |
 
 The first `deploy/macos-production/` implementation is available for
 engineering validation. OQ-18 is resolved by removing source filtering after
-Docker Desktop source-address masking was demonstrated. OQ-21 is resolved by
-the successful non-root target-Mac validation. OQ-16, OQ-17, OQ-19 and OQ-20
-retain evidence or policy gates before the pilot.
+Docker Desktop source-address masking was demonstrated. OQ-20 is resolved for
+the pilot by the isolated destructive empty-volume recovery exercise, and
+OQ-21 is resolved by the successful non-root target-Mac validation. OQ-16,
+final OQ-17 sizing/update evidence and OQ-19 retain gates before final
+production approval.

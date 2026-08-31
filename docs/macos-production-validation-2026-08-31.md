@@ -8,7 +8,7 @@ excludes the package filename, Jamf tenant, JCDS/CDN hostname, OAuth values,
 signed URL, private key and unsanitized helper logs.
 
 This is engineering acceptance evidence, not final production approval.
-Unattended reboot recovery, resource/update policy, retention, monitoring and
+Unattended reboot recovery, resource/update policy, monitoring and
 certificate-renewal ownership remain open.
 
 ## Validated target
@@ -27,7 +27,7 @@ certificate-renewal ownership remain open.
 
 | Test | Expected result | Observed result | Status |
 |---|---|---|---|
-| Compose initialization | `store-init` exits `0`; helper and NGINX become healthy | Initializer exited `0`; both long-running containers healthy | Passed |
+| Compose initialization | `store-init` exits `0`; helper, maintainer and NGINX become healthy | Initializer exited `0`; all three long-running containers healthy | Passed |
 | Trusted readiness | Client trusts certificate and receives ready response | HTTPS `200` with `{"status":"ready"}` | Passed |
 | Real cache miss | Helper authenticates, resolves, streams, verifies and publishes | HTTPS `200` with `X-Package-Source: JCDS` | Passed |
 | Local cache hit | Second request avoids upstream and returns identical bytes | HTTPS `200` with `X-Package-Source: LOCAL`; byte comparison succeeded | Passed |
@@ -37,6 +37,7 @@ certificate-renewal ownership remain open.
 | Helper unavailable — miss | Missing package fails without publishing a partial file | Controlled `502` response | Passed |
 | Helper recovery | Helper becomes healthy after restart | Both long-running containers returned to healthy state | Passed |
 | Non-root volume compatibility | Helper starts and publishes without owning/chmodding the named-volume directories | Target Mac validated UID `65532`:GID `0` model after the EPERM compatibility fix | Passed |
+| Jamf path compatibility | `/Packages/` and `/packages/` address one canonical object | Uppercase miss returned `JCDS`; lowercase follow-up returned `LOCAL`; responses were byte-identical | Passed |
 | Client-address visibility | Determine whether NGINX can enforce the former source CIDR | LAN client appeared as Docker Desktop gateway `192.168.65.1` | Failed by platform design |
 
 ## Access-policy outcome
@@ -70,14 +71,60 @@ mock end-to-end behavior, the localhost real-backend profile, production
 configuration, the actual non-root helper startup path, named-volume atomic
 publication, hardened NGINX syntax and protected TLS-key access.
 
+## Cache-lifecycle acceptance
+
+The configurable cache-maintainer was subsequently exercised on the production
+Mac with two disposable Docker volumes. The real package and maintenance
+volumes were not mounted into the test.
+
+| Check | Sanitized result |
+|---|---|
+| Runtime configuration | 90-day retention, 30% trigger and 35% target loaded |
+| Access index | Successful real cache hit produced a mode-`0600`, UID 65532/GID 0 index |
+| Index persistence | Index hash remained identical across a maintainer-container restart |
+| Eligible synthetic file | Old regular `.pkg` removed |
+| Ineligible synthetic file | Recent regular `.pkg` preserved |
+| Symlink safety | Synthetic `.pkg` symlink preserved |
+| Deletion audit | Restricted mode-`0600`, UID 65532/GID 0 audit created |
+| Test isolation | Disposable volumes removed after the test |
+
+The one-second acceptance interval intentionally caused later cleanup passes
+after the eligible file had already been removed. A later `removed_files=0`
+record therefore indicated an exhausted candidate set, not a failed deletion.
+Production retains the 15-minute default interval. The maintainer now reports
+whether cleanup actually restored its configured free-space target.
+
+## Empty-volume recovery acceptance
+
+Recovery was exercised through an isolated Compose project on port `18444`.
+The production project and its volumes remained mounted and healthy throughout.
+Only resources carrying the isolated recovery-project label were selected for
+destruction.
+
+| Check | Sanitized result |
+|---|---|
+| Isolation | Separate package and maintenance volumes created under an explicit recovery project |
+| Recovery baseline | Empty volume filled from JCDS; follow-up response was LOCAL and byte-identical |
+| Destructive target validation | Exactly two recovery volumes identified; production volumes excluded |
+| Complete data loss | Both isolated volumes and all isolated containers/networks removed |
+| Production continuity | Production readiness remained HTTPS `200` during the exercise |
+| Empty rebuild | Compose recreated both volumes and all long-running services became healthy |
+| Rehydration | Recreated cache returned `JCDS` then `LOCAL` for the same package |
+| Integrity | Rehydrated bytes matched the private pre-deletion SHA-256 baseline |
+| Cleanup | Isolated recovery project and its volumes removed after acceptance |
+
+Package bytes are therefore accepted as derived, rebuildable data for the
+pilot. Configuration, TLS material, private environment files, the approved
+repository revision and runbooks remain the authoritative recovery inputs and
+must be protected independently.
+
 ## Deferred and remaining gates
 
 - OQ-16 unattended reboot/session recovery: explicitly deferred.
-- OQ-17: disk sizing, full macOS reboot, Docker Desktop update and destructive
-  recovery remain; named-volume write, atomic publication and container restart
-  persistence passed.
+- OQ-17: final disk sizing, full macOS reboot and Docker Desktop update behavior
+  remain; named-volume write, restart persistence and destructive recovery passed.
 - OQ-19 Docker Desktop CPU, memory, disk, Resource Saver and update policy.
-- OQ-20 cache backup/rebuild policy.
-- Cache retention/cleanup and low-disk operational procedure.
+- Observe cache retention and low-disk behavior during the pilot; the isolated
+  target-Mac acceptance test passed.
 - Monitoring/alert ownership and certificate-renewal automation.
 - Actual managed-client `HEAD`, resume and multi-range behavior under OQ-05.

@@ -176,17 +176,17 @@ recreate the Compose application and repopulate the cache. Package-volume
 backup is not required unless a future requirement makes pre-populated bytes
 authoritative.
 
-Recovery is not closed until an intentional empty-volume exercise proves the
-procedure without exposing credentials or using `docker compose down --volumes`
-against an unresolved project or volume target.
+This procedure passed on the target Mac through a separately named Compose
+project. Both labeled test volumes were deleted only after exact target
+enumeration, Compose recreated an empty service, the package was rehydrated
+from JCDS and matched the private pre-deletion hash, and the production service
+remained ready. OQ-20 is resolved for the pilot.
 
 ## 5. Retained open decisions
 
 | ID | Decision or evidence still required |
 |---|---|
 | OQ-16 | Implement LaunchAgent controller and pass cold-boot-to-HTTPS recovery |
-| OQ-07 | Validate configurable 90-day retention and 30%/35% thresholds under controlled disk pressure |
-| OQ-17 | Validate final disk sizing, macOS reboot, Docker update and volume recovery |
+| OQ-17 | Validate final disk sizing, macOS reboot and Docker update behavior |
 | OQ-19 | Record service-owner Docker resource and update settings |
-| OQ-20 | Exercise empty-volume recovery and accept rebuild without package backup |
 | OQ-10 | Select monitoring platform, alert routing and retention |
