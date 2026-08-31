@@ -222,7 +222,7 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-18 | NGINX access enforcement/client IP | Blocking | RESOLVED | Docker Desktop masks clients as `192.168.65.1`; source filtering removed and unrestricted route-level access accepted | Live LAN evidence captured on 2026-08-31 |
 | OQ-19 | Docker Desktop resources and updates | High | OPEN | Disable Resource Saver and manage fixed resources/maintenance windows | Managed settings and update ownership |
 | OQ-20 | Cache backup/rebuild policy | Medium | OPEN | Rebuild package bytes from JCDS; protect configuration and certificates | Recovery owner and empty-cache recovery test |
-| OQ-21 | Production helper UID model | Blocking | IN REVIEW | UID 65532 with primary GID 0 and all capabilities dropped; UID 0 only by exception | Validate named-volume permissions on the target Mac |
+| OQ-21 | Production helper UID model | Blocking | RESOLVED | UID 65532 with primary GID 0 and all capabilities dropped; no UID-0 exception required | Real target-Mac fill, publication, restart and recovery passed |
 
 ## 6. Definition of ready for coding
 
@@ -299,12 +299,13 @@ The first coding milestone is a local, credential-free demonstration using mock 
 | 2026-08-27 | Production candidate | Added hardened Compose/NGINX configuration, manual-DNS certificate procedure, expiry validation, monitoring, update and rollback guidance | In review |
 | 2026-08-30 | Production target | Replaced Ubuntu/Docker Engine with a dedicated Mac running Docker Desktop; retained the container application architecture and marked Mac operations decisions as blocking | Active |
 | 2026-08-31 | Client access | Live LAN request appeared as Docker gateway `192.168.65.1`; removed ineffective source-CIDR filtering and accepted access by any route-reachable client | Active |
+| 2026-08-31 | macOS production validation | Trusted TLS, real fill, local hit, byte range, restart persistence, helper-outage local availability, controlled miss failure and non-root recovery passed | Complete |
 | 2026-08-30 | Real backend | Demonstrated real OAuth/catalog/resolver/JCDS fill, integrity-validated publication and a byte-identical local hit with sanitized NGINX telemetry | Complete |
 
 ## 10. Immediate next actions
 
-1. Validate OQ-16 and OQ-21 on the target Mac and collect the required recovery, named-volume and non-root evidence.
-2. Review and qualify the implemented `deploy/macos-production/` profile with real TLS material and controlled LAN exposure.
+1. Resolve Docker resource/update policy, backup/rebuild, certificate-renewal, retention, SLO and monitoring ownership before the controlled production pilot.
+2. Close the remaining OQ-17 disk-sizing, reboot, Docker Desktop update and destructive-recovery evidence.
 3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
-5. Resolve Docker resource/update policy, backup/rebuild, certificate-renewal, retention, SLO and monitoring ownership before the controlled production pilot.
+5. Complete the explicitly deferred OQ-16 unattended reboot/session recovery test before pilot approval.

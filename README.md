@@ -9,7 +9,7 @@ https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
-> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume capacity and recovery qualification, LAN source-IP enforcement, certificate renewal, retention and monitoring ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume capacity and recovery qualification, certificate renewal, retention and monitoring ownership remain production gates.
 
 ## Current milestone
 
@@ -92,13 +92,13 @@ The first production target is a dedicated Mac running Docker Desktop and servin
 
 The macOS production candidate is defined in `deploy/macos-production/` with a baked TLS-enabled NGINX configuration, named-volume storage, private helper networking and hardened containers. Package administration from macOS through Docker or purpose-built commands satisfies the visibility requirement. A live LAN test proved that Docker Desktop replaces the original source with `192.168.65.1`; source-CIDR filtering was therefore removed by explicit service-owner decision. Server-authenticated TLS protects transport but does not authorize clients. An organization-approved paid Docker Desktop entitlement is available. The package store remains derived and rebuildable from JCDS.
 
-See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, and [Production deployment](docs/production-deployment.md) for the current readiness plan. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
+See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current readiness plan, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
 NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record distinguishes `GET` and `HEAD`, full and range requests, local hits and upstream fills, response status, transferred bytes, timing, completion, and a coarse client class. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
 
-The standard behavior log intentionally excludes the URI, package name, query string, raw `Range`, raw `User-Agent`, authorization, cookies, and referrer. The source IP remains present so operators can correlate request sequences from a managed client; it must therefore receive access controls and retention appropriate for client-identifying operational data.
+The standard behavior log intentionally excludes the URI, package name, query string, raw `Range`, raw `User-Agent`, authorization, cookies, and referrer. The observed network address remains present, but Docker Desktop production traffic shows its gateway address rather than the original client; per-client attribution is unavailable at this layer.
 
 Inspect development records with:
 

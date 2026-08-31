@@ -791,6 +791,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 - **Decision:** Use a Docker named volume at `/srv/jamf-store`, backed by Docker Desktop's disk image on managed APFS storage. Provide package inventory and management from macOS through Docker or purpose-built administrative commands.
 - **Clarification:** Docker/administrative access from macOS satisfies the visibility requirement; native Finder browsing is not required.
+- **Validated evidence:** Real fill, atomic publication, local byte identity, local range delivery and persistence across helper/NGINX restart passed on the target Mac.
 - **Required follow-up:** Qualify disk sizing, atomic rename, permissions, interruption, restart, reboot, update and recovery; retain 20 percent free-space headroom.
 
 #### OQ-18 — NGINX access enforcement and client-address visibility (RESOLVED)
@@ -810,11 +811,11 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Treat packages as rebuildable derived data; protect configuration, certificates and runbooks and test empty-cache recovery.
 - **Required by:** Recovery design
 
-#### OQ-21 — Production helper identity (IN REVIEW)
+#### OQ-21 — Production helper identity (RESOLVED)
 
 - **Decision:** Prefer a non-root helper. Permit UID 0 only after explicit approval, with `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and only the package volume writable.
 - **Implementation:** The macOS production profile uses UID `65532` with primary GID `0`; `store-init` creates group-writable named-volume directories without cross-UID `chown`. All helper capabilities remain dropped.
-- **Required follow-up:** Validate this identity and permission model on the target Mac; obtain the explicit UID-0 exception only if the non-root model fails there.
+- **Validated evidence:** The target Mac started the helper healthy under this identity, completed a real JCDS fill, atomically published the package, survived serving-container restart and recovered after an intentional helper stop. No UID-0 exception is required.
 
 ### 16.1 Confirmed decisions
 
@@ -830,7 +831,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
 | D-10   | Host profile           | Dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage, Docker Desktop and a dedicated service account; automatic recovery remains to be demonstrated. |
 | D-15   | macOS storage          | Use a Docker named volume in Docker Desktop's APFS-backed VM disk image; Docker/administrative access from macOS satisfies the visibility requirement. |
-| D-16   | Runtime identity       | Prefer non-root; UID 0 requires explicit approval and the constrained security model defined by OQ-21. |
+| D-16   | Runtime identity       | Use validated UID `65532`, primary GID `0`, all capabilities dropped and a read-only root filesystem; no UID-0 exception is required. |
 | D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` with server-authenticated TLS and no source-CIDR filtering or client authentication. Any route-reachable client may request packages. |
 | D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |
 | D-13   | Secret delivery        | Inject the Jamf client secret into the helper from a root-owned mode-`0600` host environment file outside Git.                                                   |
@@ -857,7 +858,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 TLS-only service boundary (OQ-06).
 
-4.  Set the SLO and cleanup policy, then close the startup, storage qualification, Docker policy, recovery and runtime-identity evidence (OQ-04, OQ-07, OQ-16, OQ-17 and OQ-19 through OQ-21).
+4.  Set the SLO and cleanup policy, then close the startup, storage qualification, Docker policy and recovery evidence (OQ-04, OQ-07, OQ-16, OQ-17, OQ-19 and OQ-20).
 
 5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 

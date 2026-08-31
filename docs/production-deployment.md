@@ -225,8 +225,13 @@ The initial candidate implements these controls. Its helper remains non-root at
 UID `65532` with primary GID `0`, allowing writes to group-owned named-volume
 directories without the cross-UID `chown` that Docker Desktop rejected during
 integration testing. The helper retains `cap_drop: ALL`, `no-new-privileges`
-and a read-only root filesystem. This model must be validated on the target Mac
-before OQ-21 is closed.
+and a read-only root filesystem. The target Mac has validated this model.
+
+The target-Mac validation completed OQ-21: the helper became healthy as UID
+`65532`/GID `0`, performed a real fill and atomic publication, survived serving
+container restart and recovered after an intentional helper stop. See
+[`macos-production-validation-2026-08-31.md`](macos-production-validation-2026-08-31.md)
+for the sanitized evidence. Unattended Mac reboot recovery remains deferred.
 
 NGINX retains only `CHOWN`, `SETGID`, `SETUID` and `DAC_READ_SEARCH` after
 dropping all capabilities. `DAC_READ_SEARCH` lets its root master read a
@@ -298,7 +303,7 @@ name, URI, query, raw range, raw user agent, credentials or signed URL.
 
 ## Pilot acceptance sequence
 
-1. Close the remaining evidence and policy gates in OQ-16 through OQ-21 and approve the architecture.
+1. Close the remaining evidence and policy gates in OQ-16, OQ-17, OQ-19 and OQ-20 and approve the architecture.
 2. Review and qualify the implemented `deploy/macos-production/` candidate.
 3. Build and test the selected ARM64 images in CI and on the target Mac.
 4. Configure DNS, certificate, NGINX access policy, storage and protected secret delivery.
