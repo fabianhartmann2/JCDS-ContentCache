@@ -215,6 +215,24 @@ func (p *Pending) Write(data []byte) (int, error) {
 	return p.file.Write(data)
 }
 
+// OpenReader opens the growing temporary package for an independent in-flight
+// reader. If publication won the race, it opens the atomically renamed final
+// path instead.
+func (p *Pending) OpenReader() (*os.File, error) {
+	file, err := os.Open(p.tempPath)
+	if err == nil {
+		return file, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("open temporary package reader: %w", err)
+	}
+	file, err = os.Open(p.finalPath)
+	if err != nil {
+		return nil, fmt.Errorf("open published package reader: %w", err)
+	}
+	return file, nil
+}
+
 func (p *Pending) Commit(expectedBytes int64) error {
 	if p.committed {
 		return errors.New("temporary package has already been committed")

@@ -82,10 +82,34 @@ wait_until_ready
 curl --fail --silent --show-error \
   --dump-header "${temporary_directory}/miss.headers" \
   --output "${temporary_directory}/miss.pkg" \
+  http://127.0.0.1:8443/packages/ExampleFile.pkg &
+leader_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "${temporary_directory}/miss.headers" ]]; then
+    break
+  fi
+  sleep 0.01
+done
+if [[ ! -s "${temporary_directory}/miss.headers" ]]; then
+  echo "Leader did not start the streamed miss" >&2
+  wait "${leader_pid}" || true
+  exit 1
+fi
+
+curl --fail --silent --show-error \
+  --dump-header "${temporary_directory}/inflight.headers" \
+  --output "${temporary_directory}/inflight.pkg" \
   http://127.0.0.1:8443/packages/ExampleFile.pkg
+wait "${leader_pid}"
+
 assert_source_header "${temporary_directory}/miss.headers" JCDS
 assert_request_id_header "${temporary_directory}/miss.headers"
 cmp "${fixture}" "${temporary_directory}/miss.pkg"
+assert_source_header "${temporary_directory}/inflight.headers" INFLIGHT
+assert_request_id_header "${temporary_directory}/inflight.headers"
+cmp "${fixture}" "${temporary_directory}/inflight.pkg"
+cmp "${temporary_directory}/miss.pkg" "${temporary_directory}/inflight.pkg"
 
 metrics_after_miss="$(mock_metrics)"
 assert_first_fill_metrics "${metrics_after_miss}"
@@ -254,6 +278,7 @@ def require_record(**expected):
     raise SystemExit(f"missing behavior record {expected!r}; records={records!r}")
 
 require_record(method="GET", range_kind="none", status=200, source="JCDS", completion="complete")
+require_record(method="GET", range_kind="none", status=200, source="INFLIGHT", completion="complete")
 require_record(method="GET", range_kind="none", status=200, source="LOCAL", completion="complete")
 require_record(method="HEAD", range_kind="none", status=200, source="LOCAL", completion="complete")
 require_record(method="GET", range_kind="start_zero", status=206, source="LOCAL", response_range="present")
@@ -262,4 +287,4 @@ require_record(method="GET", range_kind="multi", status=206, source="LOCAL", res
 require_record(method="GET", range_kind="none", status=502, source="", completion="complete")
 PY
 
-echo "Compose smoke test passed: one upstream fill, local range/restart persistence, outage behavior, and privacy-safe NGINX monitoring."
+echo "Compose smoke test passed: one upstream fill with live INFLIGHT fan-out, local range/restart persistence, outage behavior, and privacy-safe NGINX monitoring."

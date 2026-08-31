@@ -206,6 +206,200 @@ func TestConcurrentMissesCauseOneUpstreamTransfer(t *testing.T) {
 	}
 }
 
+func TestConcurrentFollowerStreamsExistingAndFutureBytesBeforePublication(t *testing.T) {
+	firstChunk := []byte("first shared chunk\n")
+	secondChunk := []byte("second shared chunk\n")
+	expectedContent := append(append([]byte{}, firstChunk...), secondChunk...)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var objectCalls atomic.Int64
+
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		objectCalls.Add(1)
+		w.Header().Set("Content-Length", strconv.Itoa(len(expectedContent)))
+		_, _ = w.Write(firstChunk)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-release
+		_, _ = w.Write(secondChunk)
+	}))
+	defer objectServer.Close()
+
+	api, finalPath, resolver, metadata := newTestServer(t, objectServer.URL, expectedContent)
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	type result struct {
+		response *http.Response
+		body     []byte
+		err      error
+	}
+	startRequest := func(firstBytes chan<- []byte) <-chan result {
+		results := make(chan result, 1)
+		go func() {
+			response, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			prefix := make([]byte, len(firstChunk))
+			if _, err := io.ReadFull(response.Body, prefix); err != nil {
+				response.Body.Close()
+				results <- result{response: response, err: err}
+				return
+			}
+			firstBytes <- prefix
+			remainder, err := io.ReadAll(response.Body)
+			response.Body.Close()
+			results <- result{response: response, body: append(prefix, remainder...), err: err}
+		}()
+		return results
+	}
+
+	leaderPrefix := make(chan []byte, 1)
+	leaderResult := startRequest(leaderPrefix)
+	select {
+	case got := <-leaderPrefix:
+		if string(got) != string(firstChunk) {
+			t.Fatalf("leader prefix = %q, want %q", got, firstChunk)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("leader did not stream the first chunk")
+	}
+
+	followerPrefix := make(chan []byte, 1)
+	followerResult := startRequest(followerPrefix)
+	select {
+	case got := <-followerPrefix:
+		if string(got) != string(firstChunk) {
+			t.Fatalf("follower prefix = %q, want %q", got, firstChunk)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower did not receive the existing prefix before publication")
+	}
+
+	unblock()
+	leader := <-leaderResult
+	follower := <-followerResult
+	for name, got := range map[string]result{"leader": leader, "follower": follower} {
+		if got.err != nil {
+			t.Fatalf("%s request error = %v", name, got.err)
+		}
+		if string(got.body) != string(expectedContent) {
+			t.Fatalf("%s body = %q, want %q", name, got.body, expectedContent)
+		}
+	}
+	if got := leader.response.Header.Get("X-Package-Source"); got != "JCDS" {
+		t.Fatalf("leader source = %q, want JCDS", got)
+	}
+	if got := follower.response.Header.Get("X-Package-Source"); got != "INFLIGHT" {
+		t.Fatalf("follower source = %q, want INFLIGHT", got)
+	}
+	waitForFile(t, finalPath)
+	if got := objectCalls.Load(); got != 1 {
+		t.Fatalf("object calls = %d, want 1", got)
+	}
+	if got := resolver.calls.Load(); got != 1 {
+		t.Fatalf("resolver calls = %d, want 1", got)
+	}
+	if got := metadata.calls.Load(); got != 1 {
+		t.Fatalf("metadata calls = %d, want 1", got)
+	}
+}
+
+func TestConcurrentRangeWaitsForPublicationThenReturnsLocalPartialContent(t *testing.T) {
+	firstChunk := []byte("0123456789")
+	secondChunk := []byte("abcdefghijklmnopqrstuvwxyz")
+	content := append(append([]byte{}, firstChunk...), secondChunk...)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+
+	objectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+		_, _ = w.Write(firstChunk)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-release
+		_, _ = w.Write(secondChunk)
+	}))
+	defer objectServer.Close()
+
+	api, _, resolver, metadata := newTestServer(t, objectServer.URL, content)
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	leaderResponse, err := server.Client().Get(server.URL + "/packages/ExampleFile.pkg")
+	if err != nil {
+		t.Fatalf("leader GET error = %v", err)
+	}
+	leaderPrefix := make([]byte, len(firstChunk))
+	if _, err := io.ReadFull(leaderResponse.Body, leaderPrefix); err != nil {
+		t.Fatalf("read leader prefix: %v", err)
+	}
+
+	rangeResult := make(chan *http.Response, 1)
+	rangeError := make(chan error, 1)
+	go func() {
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/packages/ExampleFile.pkg", nil)
+		if err != nil {
+			rangeError <- err
+			return
+		}
+		request.Header.Set("Range", "bytes=5-9")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			rangeError <- err
+			return
+		}
+		rangeResult <- response
+	}()
+
+	select {
+	case response := <-rangeResult:
+		response.Body.Close()
+		t.Fatal("range follower returned before atomic publication")
+	case err := <-rangeError:
+		t.Fatalf("range follower failed before publication: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	unblock()
+	_, _ = io.Copy(io.Discard, leaderResponse.Body)
+	leaderResponse.Body.Close()
+
+	var rangeResponse *http.Response
+	select {
+	case rangeResponse = <-rangeResult:
+	case err := <-rangeError:
+		t.Fatalf("range follower error = %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("range follower did not complete after publication")
+	}
+	defer rangeResponse.Body.Close()
+	rangeBody, err := io.ReadAll(rangeResponse.Body)
+	if err != nil {
+		t.Fatalf("read range follower: %v", err)
+	}
+	if rangeResponse.StatusCode != http.StatusPartialContent {
+		t.Fatalf("range follower status = %d, want 206", rangeResponse.StatusCode)
+	}
+	if string(rangeBody) != string(content[5:10]) {
+		t.Fatalf("range follower body = %q, want %q", rangeBody, content[5:10])
+	}
+	if got := rangeResponse.Header.Get("X-Package-Source"); got != "LOCAL" {
+		t.Fatalf("range follower source = %q, want LOCAL", got)
+	}
+	if resolver.calls.Load() != 1 || metadata.calls.Load() != 1 {
+		t.Fatal("range follower unexpectedly caused another upstream fill")
+	}
+}
+
 func TestInvalidPackagePathDoesNotCallResolver(t *testing.T) {
 	api, _, resolver, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
 	request := httptest.NewRequest(http.MethodGet, "/packages/..%2Fsecret.pkg", nil)

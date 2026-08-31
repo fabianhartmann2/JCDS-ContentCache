@@ -128,6 +128,7 @@ unknown fields as forward-compatible additions.
     "requests": 25,
     "local_hits": 20,
     "jcds_fills": 5,
+    "inflight_followers": 3,
     "hit_ratio": 0.8,
     "bytes_served": 123456789,
     "bytes_downloaded": 23456789,
@@ -212,6 +213,7 @@ enterprise platform requires them.
 - no fresh snapshot for two or more expected intervals;
 - free space below the cleanup trigger or cleanup unable to reach its target;
 - sustained authentication, resolver, fill, integrity or capacity failures;
+- abnormal in-flight follower failures or unexpectedly high followers per fill;
 - abnormal 5xx or incomplete-transfer rate;
 - unsafe filesystem entries, stale temporary files or index inconsistency;
 - unexpected instance UUID change, restart loop or repeated reporter failure;

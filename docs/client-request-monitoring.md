@@ -43,7 +43,7 @@ If requests pass through a load balancer or forward proxy, `$remote_addr` identi
 | `range_kind` | enum | Sanitized classification of the request's `Range` header. |
 | `if_range` | enum | `present` or `absent`; the value is not logged. |
 | `status` | integer | Downstream HTTP response status. |
-| `source` | enum/string | `LOCAL`, `JCDS`, or empty when no package source was selected. |
+| `source` | enum/string | `LOCAL`, `JCDS`, `INFLIGHT`, or empty when no package source was selected. `INFLIGHT` means the request shared one active JCDS fill through the growing private temporary file. |
 | `response_range` | enum | Whether `Content-Range` was present; the value is not logged. |
 | `response_length` | enum | Whether `Content-Length` was present; the value is not logged. |
 | `bytes_sent` | integer | Response-body bytes sent to the client. |
@@ -86,6 +86,19 @@ Only the form is retained. Byte offsets and raw header syntax are intentionally 
 | `other` | User agent is present but not recognized. |
 
 The rules are deliberately coarse and should be revised from observed managed-client traffic. Do not add a classifier that copies arbitrary header text into a record.
+
+### Package source classes
+
+| Source | Meaning |
+|---|---|
+| `JCDS` | This request leads the single upstream transfer and streams it while filling the store. |
+| `INFLIGHT` | A concurrent full GET replays the written prefix and follows the same active transfer. |
+| `LOCAL` | NGINX or the helper serves a completely published local file, including a range follower released after publication. |
+
+An `INFLIGHT` response is not a second upstream transfer. Like the leading
+`JCDS` response, it can begin before final SHA3-512 verification. Only a
+`LOCAL` response is known to originate from a completely verified and
+atomically published cache file.
 
 ## Reading development logs
 
@@ -149,7 +162,7 @@ Because package identity is excluded, adjacent requests from one address are onl
 - Collect container standard output as JSON lines in the enterprise logging platform.
 - Parse only records whose `event` is `package_request`; helper service events use their own sanitized schema.
 - Preserve numeric types for status, bytes, duration, and connection counters.
-- Build dashboards for method/range/client mix, local-versus-JCDS responses, response status, incomplete transfers, bytes, and latency percentiles.
+- Build dashboards for method/range/client mix, `LOCAL`/`JCDS`/`INFLIGHT` responses, fan-out followers per fill, response status, incomplete transfers, bytes, and latency percentiles.
 - Alert on sustained 5xx rates and abnormal incomplete-transfer rates; tune thresholds from the pilot rather than isolated events.
 - Restrict source-IP access and apply the approved retention policy in the collector.
 - Keep the default package-identity exclusion. Any temporary diagnostic mode that records package identity requires an explicit security/privacy approval, a short expiry, protected storage, and deletion verification.

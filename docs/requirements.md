@@ -33,6 +33,8 @@ Software packages are hosted in JCDS and can only be located through authenticat
 - A client can retrieve an approved package from one stable internal HTTPS namespace.
 
 - The first request begins receiving data without waiting for the entire upstream object to be downloaded.
+- Concurrent full GET followers begin with the already written prefix and share
+  the same ongoing upstream transfer instead of waiting for final publication.
 
 - Subsequent requests are served locally without a Jamf API call or JCDS download.
 
@@ -222,7 +224,13 @@ Software packages are hosted in JCDS and can only be located through authenticat
 
 8.  After a successful complete 200 response, exact byte-count match and SHA3-512 match, the helper atomically renames the temporary file to the exact final URL-derived path. A failure, partial response, truncation or digest mismatch leaves no file in the served namespace.
 
-9.  Waiting requests for the same canonical path are served from the completed final file.
+9.  Concurrent full GET requests for the same path attach to the active fill,
+    replay the already written prefix from the growing private temporary file
+    and follow newly written bytes without creating another JCDS transfer.
+
+10. Range followers wait for successful atomic publication and are then served
+    from the completed local file with normal 206 semantics. HEAD misses retain
+    the controlled retry response.
 
 ### 8.3 Upstream outage
 
@@ -294,9 +302,14 @@ Because the first client receives bytes before the complete digest is known, a f
 
 ### FR-011 Concurrent miss coalescing
 
-Only one upstream fill operation should run for a canonical package path at a time. Other requests for that package must wait for the completed final file or receive a controlled timeout according to configuration.
+Only one upstream fill operation may run for a canonical package path at a
+time. Concurrent full GET requests must independently read the already written
+prefix and future bytes from the growing private temporary file without
+blocking the upstream writer or each other. They return
+`X-Package-Source: INFLIGHT`. Range followers wait for the completed final file;
+an error before publication must not expose a reusable partial file.
 
-> **Priority: Must. Acceptance:** A simultaneous-client test produces one resolver/download sequence and one final file for the package.
+> **Priority: Must. Acceptance:** A simultaneous-client test proves that a follower receives the available prefix before publication, both full clients receive byte-identical content, one resolver/download sequence occurs, range followers return local 206 only after publication, and an interrupted shared fill leaves no final file.
 
 ### FR-012 Client disconnect handling
 
@@ -312,7 +325,7 @@ Because filenames are immutable, a successful final file may be reused without u
 
 ### FR-014 HEAD and byte ranges
 
-The service must define and test behaviour for HEAD and single byte-range requests on local hits and store misses. Local files should support normal static byte-range delivery. A miss must trigger a complete upstream 200 retrieval; a partial 206 response must never be published as the final file. Multi-range behaviour may be rejected if not required by clients.
+The service must define and test behaviour for HEAD and single byte-range requests on local hits and store misses. Local files should support normal static byte-range delivery. A miss must trigger a complete upstream 200 retrieval; a partial 206 response must never be published as the final file. A Range request arriving during an active fill waits for atomic publication and is then served from the local file. NGINX may preserve Range and If-Range only to the private helper for this decision; the helper must never forward them to JCDS. Multi-range behaviour may be rejected if not required by clients.
 
 > **Priority: Must. Acceptance:** The agreed client request patterns pass without corrupting the package store; local partial-content headers and lengths are correct.
 
@@ -410,7 +423,7 @@ Host and container egress should be restricted to the Jamf tenant, approved JCDS
 
 ### NFR-009 Auditability
 
-The standard NGINX client-behavior log must contain timestamp, source client address, coarse client class, request/correlation ID, connection identifiers, HTTP protocol, method, range class, If-Range presence, result status, package source (LOCAL or JCDS), response range/length presence, byte count, duration, upstream status/timing and request completion. It must not contain the URI, package name, query string, raw Range or User-Agent values, Authorization, cookies, referrer, client tokens, Jamf tokens, client secrets or signed URLs. Source addresses are client-identifying operational data and require restricted access and an approved retention period.
+The standard NGINX client-behavior log must contain timestamp, source client address, coarse client class, request/correlation ID, connection identifiers, HTTP protocol, method, range class, If-Range presence, result status, package source (`LOCAL`, `JCDS` or `INFLIGHT`), response range/length presence, byte count, duration, upstream status/timing and request completion. It must not contain the URI, package name, query string, raw Range or User-Agent values, Authorization, cookies, referrer, client tokens, Jamf tokens, client secrets or signed URLs. Source addresses are client-identifying operational data and require restricted access and an approved retention period.
 
 > **Priority: Must. Acceptance:** Automated tests prove the behavior schema and representative GET, HEAD, start-at-zero, resumed, multi-range, local, upstream and error classifications; a disclosure check finds none of the excluded fields or values.
 
@@ -458,7 +471,7 @@ The downstream response must be compatible with the HTTP client used by the Mac 
 | Dependency temporarily unavailable | 502 or 503 with a short non-sensitive response                                   |
 | Dependency timeout                 | 504 Gateway Timeout or a closed partial stream if bytes were already sent        |
 | Capacity failure                   | Controlled 5xx response; no final file is published                              |
-| Diagnostic source header           | X-Package-Source: LOCAL/JCDS may be enabled for approved clients or diagnostics  |
+| Diagnostic source header           | `X-Package-Source: LOCAL`, `JCDS` or `INFLIGHT`                                  |
 
 ### 11.2 Internal helper contract
 
@@ -466,7 +479,9 @@ The downstream response must be compatible with the HTTP client used by the Mac 
 
 - The helper returns the package stream and safe metadata on success.
 
-- The helper coordinates one active upstream fill per canonical package path and gives waiters a completed local file or a controlled timeout.
+- The helper coordinates one active upstream fill per canonical package path.
+  Full GET followers stream the growing temporary file; Range followers wait
+  for a completed local file; all failure paths retain controlled cleanup.
 
 - For an absent package, the helper requests a complete upstream object and does not forward a client Range header as an upstream partial-object request.
 
@@ -645,7 +660,7 @@ NGINX.
 | AT-01  | Store miss            | Retrieve an absent package; verify one Jamf resolution, one JCDS transfer, MISS telemetry and publication under the exact canonical final filename.                                              |
 | AT-02  | Streaming             | Throttle the upstream; verify the client receives bytes before upstream completion and memory remains bounded.                                                                                   |
 | AT-03  | Local hit             | Repeat the request; verify identical bytes are served from the human-readable final path with LOCAL/HIT telemetry and no helper/Jamf call.                                                       |
-| AT-04  | Concurrent miss       | Request one locally absent package from multiple clients; verify one upstream fill and correct waiting-client results.                                                                           |
+| AT-04  | Concurrent miss       | Request one locally absent package from multiple clients; verify one upstream fill, pre-publication `INFLIGHT` bytes, byte-identical full responses, deferred local Range semantics and no partial publication on failure.                                      |
 | AT-05  | Client abort          | Disconnect the initiating client; verify the store fill completes, the final file is atomically published and the next request is a valid local HIT.                                             |
 | AT-06  | Token reuse           | Request several locally absent packages within one token lifetime; verify a shared token.                                                                                                        |
 | AT-07  | Token expiry/401      | Force expiration and 401; verify early renewal and at most one authenticated retry.                                                                                                              |
@@ -900,7 +915,7 @@ Resolve the remaining questions in this order because each answer constrains the
 | **Area**      | **Minimum signals**                                                                                                |
 |---------------|--------------------------------------------------------------------------------------------------------------------|
 | Request       | request count, status, duration, bytes, method, sanitized package label                                            |
-| Package store | LOCAL/JCDS source, hits, misses, final files/bytes, temporary bytes, lock wait, cleanup and administrative changes |
+| Package store | LOCAL/JCDS/INFLIGHT source, hits, misses, followers, final files/bytes, temporary bytes, lock wait, cleanup and administrative changes |
 | Helper        | active streams, catalog/resolver latency and status, integrity failures, download latency/status, redirects rejected |
 | OAuth         | refresh attempts, success/failure, token time-to-expiry; never token value                                         |
 | Storage       | final bytes/files, free bytes/percent, temporary bytes, unsafe objects and publication failures                    |
@@ -917,7 +932,7 @@ Resolve the remaining questions in this order because each answer constrains the
 | Pull-through package store | A human-readable local file store populated automatically when a client first requests an absent package. |
 | Resolver                   | The Jamf API call that maps a package filename to a temporary download URL.                               |
 | Signed URL                 | A time-limited URL carrying authorization data in its query parameters or signature.                      |
-| Single-flight              | Coalescing simultaneous operations so one token refresh or object download serves multiple waiters.       |
+| Single-flight              | Coalescing simultaneous operations so one token refresh or object download serves multiple coordinated callers. |
 | SSRF                       | Server-side request forgery: misuse of a server to connect to an attacker-selected destination.           |
 
 ## Appendix D. Authoritative references

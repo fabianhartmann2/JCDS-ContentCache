@@ -132,6 +132,20 @@ func (s *Server) handlePackage(w http.ResponseWriter, r *http.Request) {
 
 	handle, leader := s.flights.Join(filename)
 	if !leader {
+		if r.Header.Get("Range") == "" {
+			tracked := &trackingResponseWriter{ResponseWriter: w}
+			if err := s.streamInflight(r.Context(), tracked, filename, handle); err != nil && !tracked.started {
+				// A completed file can win the narrow race between the first
+				// local lookup and joining a flight that is being removed.
+				if localErr := s.serveLocal(w, r, filename); localErr == nil {
+					return
+				}
+				s.writeError(w, filename, err)
+			} else if err != nil {
+				s.logger.Info("in-flight client disconnected or shared fill failed", "filename", filename, "error", err)
+			}
+			return
+		}
 		if err := handle.Wait(r.Context()); err != nil {
 			s.writeError(w, filename, err)
 			return
@@ -142,10 +156,21 @@ func (s *Server) handlePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The package may have been published after the initial local lookup but
+	// before this request created a new flight.
+	if err := s.serveLocal(w, r, filename); err == nil {
+		handle.Finish(nil)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		handle.Finish(err)
+		s.writeError(w, filename, err)
+		return
+	}
+
 	fillContext, cancel := context.WithTimeout(context.Background(), s.fillTimeout)
 	defer cancel()
 	tracked := &trackingResponseWriter{ResponseWriter: w}
-	err = s.fillAndStream(fillContext, tracked, filename)
+	err = s.fillAndStream(fillContext, tracked, filename, handle)
 	handle.Finish(err)
 	if err != nil && !tracked.started {
 		s.writeError(w, filename, err)
@@ -154,7 +179,7 @@ func (s *Server) handlePackage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, filename string) error {
+func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, filename string, flight *store.FlightHandle) error {
 	metadata, err := s.metadata.Lookup(ctx, filename)
 	if err != nil {
 		return err
@@ -186,6 +211,9 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 		return err
 	}
 	defer pending.Abort()
+	if err := flight.Prepare(pending, metadata.Length); err != nil {
+		return err
+	}
 
 	copySafeHeaders(w.Header(), upstream.Header, filename)
 	w.Header().Set("Content-Length", strconv.FormatInt(metadata.Length, 10))
@@ -209,6 +237,7 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 			if _, err := hasher.Write(buffer[:readBytes]); err != nil {
 				return fmt.Errorf("hash temporary package: %w", err)
 			}
+			flight.Advance(downloaded)
 			if clientConnected {
 				if _, err := w.Write(buffer[:readBytes]); err != nil {
 					clientConnected = false
@@ -238,6 +267,49 @@ func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, f
 	}
 	s.logger.Info("package published", "filename", filename, "bytes", downloaded, "integrity", "sha3-512")
 	return nil
+}
+
+func (s *Server) streamInflight(ctx context.Context, w *trackingResponseWriter, filename string, flight *store.FlightHandle) error {
+	file, expectedBytes, err := flight.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Content-Length", strconv.FormatInt(expectedBytes, 10))
+	w.Header().Set("X-Package-Source", "INFLIGHT")
+	w.WriteHeader(http.StatusOK)
+
+	buffer := make([]byte, 64*1024)
+	var offset int64
+	for offset < expectedBytes {
+		readBytes, readErr := file.Read(buffer)
+		if readBytes > 0 {
+			if _, err := w.Write(buffer[:readBytes]); err != nil {
+				return err
+			}
+			offset += int64(readBytes)
+			w.Flush()
+		}
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return fmt.Errorf("read growing temporary package: %w", readErr)
+		}
+		if offset >= expectedBytes {
+			break
+		}
+		if readBytes == 0 || errors.Is(readErr, io.EOF) {
+			writtenBytes, finished, flightErr := flight.WaitForBytes(ctx, offset)
+			if finished && writtenBytes <= offset {
+				if flightErr != nil {
+					return flightErr
+				}
+				return fmt.Errorf("shared package fill ended after %d of %d bytes", offset, expectedBytes)
+			}
+		}
+	}
+	return flight.Wait(ctx)
 }
 
 func (s *Server) serveLocal(w http.ResponseWriter, r *http.Request, filename string) error {

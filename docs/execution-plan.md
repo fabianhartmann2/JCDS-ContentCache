@@ -45,7 +45,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Upstream access | OAuth 2.0 client credentials, followed by the Jamf file-resolution API and temporary JCDS URL |
 | First requester | Receives a streamed response while the store is being filled |
 | Publication | Download into hidden same-filesystem temporary storage; validate; atomically rename |
-| Concurrency | One upstream transfer per canonical package while concurrent callers wait or share the coordinated result |
+| Concurrency | One upstream transfer per canonical package; full GET followers live-stream the growing private file while Range followers wait for publication |
 | Cache model | Do not use NGINX's opaque hashed `proxy_cache` as the authoritative store |
 | Repository | Public GitHub repository [`fabianhartmann2/JCDS-ContentCache`](https://github.com/fabianhartmann2/JCDS-ContentCache) |
 
@@ -106,6 +106,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement streaming object download without whole-file memory buffering.
 - [x] Implement same-filesystem temporary files and atomic publication.
 - [x] Implement per-package single-flight coordination.
+- [x] Add live in-flight fan-out so concurrent full GET followers receive existing and future bytes from the one active JCDS transfer.
+- [x] Keep concurrent Range requests behind the publication gate and serve them as local 206 responses after verification.
 - [x] Continue a bounded upstream fill after the initiating client disconnects, and test successful subsequent local delivery.
 - [x] Configure NGINX `try_files` for local hits and an internal helper route for misses.
 - [x] Add Dockerfiles and a local Docker Compose stack.
@@ -121,6 +123,8 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] A completed download appears at the deterministic final path and matches the source bytes.
 - [x] The second request is served locally without OAuth, Jamf API or object-download calls.
 - [x] Concurrent misses for one package cause one upstream object transfer.
+- [x] A full GET follower receives bytes before publication with `X-Package-Source: INFLIGHT` and matches the leader byte-for-byte.
+- [x] A concurrent Range follower waits for publication and then receives `206 LOCAL` without another upstream transfer.
 - [x] An interrupted or corrupt transfer never appears at the final public path.
 - [x] A client abort behaves according to the recorded policy.
 - [x] Restarting the containers preserves and serves completed packages.
@@ -282,7 +286,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 - Docker Compose development stack.
 - Mock OAuth, resolver and package endpoints.
 - Integration test for miss, streaming fill, atomic publication and subsequent local hit.
-- Integration test for concurrent requests producing one upstream transfer.
+- Integration test for one upstream transfer with byte-identical `JCDS` leader and live `INFLIGHT` follower responses.
 - README with setup, test and architecture notes.
 - Copies of the requirements and this execution plan under `docs/`.
 

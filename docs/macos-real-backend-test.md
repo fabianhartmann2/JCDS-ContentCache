@@ -156,6 +156,11 @@ Expected source:
 X-Package-Source: LOCAL
 ```
 
+This sequential second request starts after publication and is therefore
+`LOCAL`. A concurrent full GET started while the first fill is still active is
+expected to return `X-Package-Source: INFLIGHT`, receive the already downloaded
+prefix immediately and then follow the same single JCDS transfer.
+
 The second request is served directly by NGINX and makes no Jamf or JCDS request.
 
 ## 5. Inspect privacy-safe behavior records

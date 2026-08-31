@@ -335,6 +335,15 @@ maintainer mount contains only the public certificate, never its private key.
 
 ## Pilot acceptance sequence
 
+Before accepting concurrent delivery, use one approved package that is absent
+from the cache and start two full GETs close together. The first must report
+`JCDS`, the second must report `INFLIGHT`, both outputs must compare
+byte-for-byte, and upstream telemetry must show one object transfer. Repeat
+with a Range follower during a fresh fill: it must wait for atomic publication
+and then return `206 LOCAL`. A deliberately interrupted isolated test must
+leave no final package. Do not publish the test filename or unfiltered helper
+logs.
+
 1. Close the remaining evidence and policy gates in OQ-16, OQ-17 and OQ-19 and approve the architecture.
 2. Review and qualify the implemented `deploy/macos-production/` candidate.
 3. Build and test the selected ARM64 images in CI and on the target Mac.

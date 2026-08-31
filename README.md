@@ -97,11 +97,18 @@ The first production target is a dedicated Mac running Docker Desktop and servin
 
 The macOS production candidate is defined in `deploy/macos-production/` with a baked TLS-enabled NGINX configuration, named-volume storage, private helper networking and hardened containers. Package administration from macOS through Docker or purpose-built commands satisfies the visibility requirement. A live LAN test proved that Docker Desktop replaces the original source with `192.168.65.1`; source-CIDR filtering was therefore removed by explicit service-owner decision. Server-authenticated TLS protects transport but does not authorize clients. An organization-approved paid Docker Desktop entitlement is available. The package store remains derived and rebuildable from JCDS.
 
+Concurrent full cache misses for one package share exactly one JCDS transfer.
+The leading request reports `X-Package-Source: JCDS`; followers immediately
+replay the available prefix from the growing private temporary file, follow new
+bytes and report `X-Package-Source: INFLIGHT`. Range followers wait for verified
+atomic publication and then receive normal `206 LOCAL` delivery. Only a
+length- and SHA3-512-verified file becomes visible in the final cache namespace.
+
 See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current runbook, [Production readiness plan](docs/production-readiness-plan.md) for the retained path to approval, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
-NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record distinguishes `GET` and `HEAD`, full and range requests, local hits and upstream fills, response status, transferred bytes, timing, completion, and a coarse client class. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
+NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record distinguishes `GET` and `HEAD`, full and range requests, local hits, upstream fills and shared in-flight followers, response status, transferred bytes, timing, completion, and a coarse client class. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
 
 The standard behavior log intentionally excludes the URI, package name, query string, raw `Range`, raw `User-Agent`, authorization, cookies, and referrer. The observed network address remains present, but Docker Desktop production traffic shows its gateway address rather than the original client; per-client attribution is unavailable at this layer.
 

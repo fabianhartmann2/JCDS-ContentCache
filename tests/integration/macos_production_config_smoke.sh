@@ -46,6 +46,11 @@ if ! grep -q 'rewrite \^/Packages/' "${repository_root}/deploy/macos-production/
   exit 1
 fi
 
+if grep -q 'proxy_set_header Range ""' "${repository_root}/deploy/macos-production/nginx.conf"; then
+  echo "The macOS production profile must preserve Range to the helper for safe in-flight follower handling" >&2
+  exit 1
+fi
+
 docker compose --file "${compose_file}" build nginx cache-helper cache-maintainer
 docker compose --file "${compose_file}" run --rm --no-deps store-init
 

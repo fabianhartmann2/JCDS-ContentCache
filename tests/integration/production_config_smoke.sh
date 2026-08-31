@@ -40,6 +40,11 @@ CACHE_HELPER_ENV_FILE="${helper_environment}" \
 LETSENCRYPT_ROOT="${temporary_directory}/letsencrypt" \
   docker compose --file "${compose_file}" config --quiet
 
+if grep -q 'proxy_set_header Range ""' "${nginx_config}"; then
+  echo "The production profile must preserve Range to the helper for safe in-flight follower handling" >&2
+  exit 1
+fi
+
 docker run --rm \
   --read-only \
   --cap-drop ALL \

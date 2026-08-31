@@ -26,8 +26,8 @@ services:
       MOCK_FIXTURE_ROOT: /fixtures
       MOCK_CLIENT_ID: mock-client
       MOCK_CLIENT_SECRET: mock-secret
-      MOCK_CHUNK_DELAY: 75ms
-      MOCK_CHUNK_SIZE: "4096"
+      MOCK_CHUNK_DELAY: 150ms
+      MOCK_CHUNK_SIZE: "32"
     read_only: true
     volumes:
       - ../../testdata/packages:/fixtures:ro

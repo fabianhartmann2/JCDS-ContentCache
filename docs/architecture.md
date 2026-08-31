@@ -24,8 +24,9 @@ flowchart TD
     C["Managed Macs"] -->|"HTTPS :8443"| H["macOS host boundary"]
     H --> N["NGINX container"]
     N -->|"Local hit"| V["Package-store volume"]
-    N -->|"Store miss"| G["Go helper container"]
+    N -->|"Store miss or follower"| G["Go helper container"]
     G --> V
+    V -->|"Growing private file"| G
     G -->|"OAuth and metadata HTTPS"| J["Jamf Pro"]
     G -->|"Validated package HTTPS"| D["Approved JCDS/CDN"]
 ```
@@ -41,7 +42,7 @@ representation backing that container path is a separate production decision.
 | Dedicated Mac | Physical availability, macOS lifecycle, network, time, power and Docker Desktop startup |
 | Docker Desktop | Linux VM, Docker Engine, Compose, container networking, image storage and persistent-volume implementation |
 | NGINX | TLS termination, client method/path controls, local static delivery, miss routing and privacy-safe request telemetry |
-| Go helper | OAuth, Jamf catalog/resolver access, destination validation, streaming, SHA3-512/length verification and atomic publication |
+| Go helper | OAuth, Jamf catalog/resolver access, destination validation, one-transfer in-flight fan-out, SHA3-512/length verification and atomic publication |
 | Package-store volume | Immutable completed packages and hidden same-filesystem temporary downloads |
 | Cache maintainer | Restricted access index, capacity cleanup and the planned decoupled webhook snapshot reporter |
 | Operations integration | Webhook receiver, external reachability, alerts, certificate expiry, host capacity, controlled updates and recovery |
@@ -64,6 +65,10 @@ representation backing that container path is a separate production decision.
 - The helper accepts a canonical filename, never a client-supplied URL. Every
   resolved URL and redirect remains subject to exact-host, HTTPS, DNS-address
   and destination checks.
+- One leader writes each active fill under the private temporary directory.
+  Concurrent full GET followers use independent readers over that growing file;
+  Range followers wait for publication. NGINX never exposes the temporary path.
+  Only a verified atomic rename creates a reusable local object.
 - The package store is derived and rebuildable. Configuration, certificates,
   deployment metadata and recovery procedures require protection; cached
   package bytes do not require authoritative backup unless operations chooses
@@ -123,6 +128,7 @@ server platform.
 | AD-11 | Production package storage uses a Docker named volume in Docker Desktop's APFS-backed VM disk image. |
 | AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
 | AD-13 | Extend the existing cache-maintainer with an optional HTTPS webhook reporter; receiver failure must never affect package delivery, cleanup or readiness. |
+| AD-14 | Coalesce concurrent full GET misses into one JCDS transfer and stream followers from the growing private temporary file; Range followers wait for verified publication. |
 
 The reporter design, payload and privacy boundary are specified in
 `docs/webhook-monitoring.md`. It is not yet implemented. It intentionally does

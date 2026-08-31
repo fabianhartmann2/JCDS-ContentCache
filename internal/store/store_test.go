@@ -73,6 +73,47 @@ func TestPendingPublishesCompleteFileAtomically(t *testing.T) {
 	}
 }
 
+func TestPendingReaderFollowsGrowingFileAcrossAtomicPublication(t *testing.T) {
+	root := t.TempDir()
+	packageStore, err := New(filepath.Join(root, "packages"), filepath.Join(root, ".temporary"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	pending, err := packageStore.Begin("ExampleFile.pkg")
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer pending.Abort()
+
+	first := []byte("first")
+	second := []byte("second")
+	if _, err := pending.Write(first); err != nil {
+		t.Fatalf("write first chunk: %v", err)
+	}
+	reader, err := pending.OpenReader()
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer reader.Close()
+	gotFirst := make([]byte, len(first))
+	if _, err := io.ReadFull(reader, gotFirst); err != nil {
+		t.Fatalf("read first chunk: %v", err)
+	}
+	if _, err := pending.Write(second); err != nil {
+		t.Fatalf("write second chunk: %v", err)
+	}
+	if err := pending.Commit(int64(len(first) + len(second))); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	gotSecond := make([]byte, len(second))
+	if _, err := io.ReadFull(reader, gotSecond); err != nil {
+		t.Fatalf("read second chunk after publication: %v", err)
+	}
+	if string(append(gotFirst, gotSecond...)) != "firstsecond" {
+		t.Fatalf("growing reader returned %q", append(gotFirst, gotSecond...))
+	}
+}
+
 func TestAbortDoesNotPublishFile(t *testing.T) {
 	root := t.TempDir()
 	packageStore, err := New(filepath.Join(root, "packages"), filepath.Join(root, ".temporary"))
