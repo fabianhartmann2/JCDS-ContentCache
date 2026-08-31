@@ -24,8 +24,8 @@ The existing profiles have different purposes:
 | Host platform | Dedicated Mac running Docker Desktop |
 | Service DNS | `jcds-cache.appfruit.ch` |
 | Listener | HTTPS on TCP 8443 |
-| Client network | `192.168.0.0/16` |
-| Client authentication | CIDR restriction plus server-authenticated TLS for v1 |
+| Client network | Any network with a route to the Mac listener |
+| Client authentication | None; server-authenticated TLS only |
 | Workload | 500–2,000 managed Macs |
 | Cache capacity | 500 GB–1 TB usable with at least 20 percent headroom |
 | Container data paths | `/srv/jamf-store/packages` and `/srv/jamf-store/.temporary` |
@@ -40,8 +40,7 @@ Production-pilot approval still requires closure of:
 2. Paid Docker Desktop subscription ownership, renewal and support contacts; entitlement is available.
 3. Dedicated macOS account and unattended restart/session model.
 4. Named-volume capacity/recovery evidence and confirmation of the required macOS visibility semantics.
-5. NGINX source-address visibility and allowed/denied LAN evidence.
-6. Production helper UID model for the selected storage implementation.
+5. Production helper UID model for the selected storage implementation.
 
 The pilot additionally requires Docker resource/update policy, cache recovery,
 certificate-renewal ownership, monitoring ownership, retention and SLO.
@@ -182,19 +181,22 @@ acceptable for the controlled pilot only when:
 - renewal and NGINX reload are tested;
 - unattended renewal is planned before general production approval.
 
-## Network and firewall controls
+## Network exposure
 
 The production listener binds TCP 8443 to the approved host interface. The
 localhost test profile must remain bound to `127.0.0.1`.
 
-No host firewall is planned. NGINX is therefore the intended enforcement point
-for `192.168.0.0/16`. Because Docker Desktop forwards traffic through its Linux
-VM, this design is blocked until a LAN test proves NGINX receives a trustworthy
-original source address. Test one allowed client and one client outside the
-approved range, record NGINX's observed address, and prove the latter receives
-a denial. If both appear as a Docker gateway or another shared address, NGINX
-cannot implement the requirement and a source-aware host/perimeter control is
-mandatory.
+No host firewall, source-CIDR filter or client authentication is used. A live
+LAN request proved that Docker Desktop replaces the original client address
+with gateway `192.168.65.1`, so NGINX cannot enforce the former source policy.
+The service owner explicitly chose to remove that policy and accept requests
+from any client able to route to TCP 8443.
+
+Server-authenticated TLS protects confidentiality and server authenticity in
+transit; it does not authorize the requesting client. A route-reachable client
+that knows or guesses a package filename can retrieve a cached package or
+trigger a JCDS fill. This exposure is an accepted service boundary and must be
+reassessed if network reachability expands.
 
 Only TCP 8443 may be published. The helper and plaintext health endpoint remain
 inside the Docker network/container boundary. Outbound HTTPS is limited to the
@@ -274,11 +276,9 @@ docker compose \
 Expected state: `store-init` exited `0`; `cache-helper` and `nginx` are healthy.
 Do not use `down --volumes` during normal restart or upgrade operations.
 
-The first LAN request is an OQ-18 acceptance test, not merely a connectivity
-check. The privacy-safe NGINX record must show the real client source address.
-If it shows a Docker bridge/gateway address, stop: the configured NGINX CIDR
-policy cannot distinguish allowed and denied clients and the no-firewall design
-is not acceptable for production.
+LAN acceptance must confirm trusted TLS, health and package delivery. NGINX
+monitoring will record Docker Desktop's gateway address rather than the original
+client, so per-client attribution is unavailable at this layer.
 
 ## Monitoring and operations
 

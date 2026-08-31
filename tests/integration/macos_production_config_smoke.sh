@@ -35,6 +35,12 @@ export JCDS_MAC_PROD_LISTEN_PORT=18443
 export JCDS_MAC_PROD_IMAGE_TAG=ci
 
 docker compose --file "${compose_file}" config --quiet
+
+if grep -q 'allow 192\.168\.0\.0/16' "${repository_root}/deploy/macos-production/nginx.conf"; then
+  echo "The macOS production profile must not claim ineffective source-CIDR enforcement behind Docker Desktop" >&2
+  exit 1
+fi
+
 docker compose --file "${compose_file}" build nginx cache-helper
 docker compose --file "${compose_file}" run --rm --no-deps store-init
 

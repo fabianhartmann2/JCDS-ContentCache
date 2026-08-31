@@ -106,7 +106,7 @@ docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
   > package-behavior.jsonl
 ```
 
-Remove the temporary export after the analysis or place it in an approved restricted log location; it contains client source addresses.
+Remove the temporary export after the analysis or place it in an approved restricted log location. It contains the network address observed by NGINX; Docker Desktop production traffic is expected to show its gateway address rather than the original client.
 
 ## Useful analyses
 

@@ -49,10 +49,10 @@ representation backing that container path is a separate production decision.
 
 - Only NGINX publishes TCP 8443. The helper remains private to the Docker
   network.
-- NGINX is intended to enforce the source CIDR because no host firewall is
-  planned. This is acceptable only if a production-LAN test proves that Docker
-  Desktop preserves the real client address. Until that evidence exists,
-  OQ-18 remains a blocking security decision.
+- No host firewall, source-CIDR filtering or client authentication is used.
+  A live LAN test proved that Docker Desktop replaces the real client address
+  with `192.168.65.1`, making NGINX source filtering ineffective. The service
+  owner explicitly accepted access by any client able to route to TCP 8443.
 - NGINX terminates server-authenticated TLS for
   `jcds-cache.appfruit.ch`. Certificate and private-key material is mounted
   read-only from a protected macOS directory or delivered through an approved
@@ -111,7 +111,7 @@ server platform.
 | AD-02 | NGINX and the Go helper remain separate containers. |
 | AD-03 | The helper retains OAuth/Jamf/JCDS logic; clients never receive upstream credentials or signed URLs. |
 | AD-04 | Final files retain their canonical original filename; opaque NGINX proxy-cache storage is not authoritative. |
-| AD-05 | `jcds-cache.appfruit.ch:8443` and client CIDR `192.168.0.0/16` remain the intended service boundary. |
+| AD-05 | `jcds-cache.appfruit.ch:8443` uses server-authenticated TLS but no source-CIDR filtering or client authentication; any route-reachable client may request packages. |
 | AD-06 | Package names are immutable and publication requires exact catalog length and SHA3-512 verification. |
 | AD-07 | The current `deploy/macos/` stack remains a localhost integration profile, not the production listener. |
 | AD-08 | The host is a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage. |
@@ -125,12 +125,12 @@ server platform.
 | ID | Decision required | Recommended starting position |
 |---|---|---|
 | OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
-| OQ-18 | Docker Desktop source-address visibility | No firewall selected; prove NGINX sees and rejects the real disallowed LAN source before relying on it |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
 | OQ-20 | Cache backup/rebuild and Docker Desktop disaster recovery | Treat package bytes as rebuildable; back up only configuration/certificates and test empty-cache recovery |
 | OQ-21 | Storage permission evidence for the selected identity | Prefer non-root; UID 0 is allowed only after explicit approval with all capabilities dropped and a read-only root filesystem |
 
 The first `deploy/macos-production/` implementation is available for
-engineering validation. OQ-16, OQ-18 and OQ-21 have selected directions but
-require target-Mac acceptance evidence before the pilot. OQ-19 and OQ-20 must
-also be resolved before it.
+engineering validation. OQ-18 is resolved by removing source filtering after
+Docker Desktop source-address masking was demonstrated. OQ-16 and OQ-21 still
+require target-Mac acceptance evidence; OQ-19 and OQ-20 must also be resolved
+before the pilot.

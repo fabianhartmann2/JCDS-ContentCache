@@ -131,7 +131,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Cache storage          | Provision 500 GB–1 TB of usable cache storage and retain at least 20 percent operational headroom.                                                                          | Resolved range      |
 | Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
-| Client access          | Permit source CIDR `192.168.0.0/16`; no additional client authentication is required for v1.                                                                               | Resolved            |
+| Client access          | Use server-authenticated TLS without source-CIDR filtering or client authentication; any route-reachable client may request packages.                                      | Resolved            |
 | Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Docker named volume in Docker Desktop's APFS-backed disk image; Docker/administrative access from macOS satisfies the visibility requirement. | Resolved            |
 | Secret delivery        | Pass the Jamf client secret through a root-owned mode-`0600` host environment file outside Git.                                                                             | Resolved            |
 | DNS and certificate    | Use manual DNS records and manual DNS validation for initial certificate issuance; expiry monitoring is mandatory and unattended renewal remains a production gate.          | Pilot decision      |
@@ -702,8 +702,8 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-02 — Client access control (RESOLVED)
 
-- **Decision:** Use server-authenticated TLS and restrict v1 access to source CIDR `192.168.0.0/16`; no additional client authentication is required.
-- **Required follow-up:** Validate from one allowed and one denied LAN source that NGINX sees trustworthy source addresses and enforces the CIDR; if Docker Desktop masks them, add a source-aware host/perimeter control.
+- **Decision:** Use server-authenticated TLS without source-CIDR filtering or client authentication. Any network client able to route to TCP 8443 may request a known package filename and trigger an upstream fill.
+- **Accepted consequence:** Transport is authenticated and encrypted, but clients are not authorized. Network exposure and package-name confidentiality are outside the application boundary.
 
 #### OQ-03 — Workload and capacity (IN REVIEW)
 
@@ -793,10 +793,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Clarification:** Docker/administrative access from macOS satisfies the visibility requirement; native Finder browsing is not required.
 - **Required follow-up:** Qualify disk sizing, atomic rename, permissions, interruption, restart, reboot, update and recovery; retain 20 percent free-space headroom.
 
-#### OQ-18 — NGINX access enforcement and client-address visibility (IN REVIEW)
+#### OQ-18 — NGINX access enforcement and client-address visibility (RESOLVED)
 
-- **Decision:** Do not deploy a host firewall; use NGINX to reject clients outside `192.168.0.0/16`.
-- **Required follow-up:** Prove from allowed and disallowed LAN sources that Docker Desktop preserves a trustworthy client address at NGINX. If it does not, this decision is infeasible and a source-aware host/perimeter control becomes mandatory.
+- **Observed evidence:** A LAN request from a managed client reached NGINX as Docker Desktop gateway `192.168.65.1`, not its real source address. Because the gateway itself matched the former `/16` allowlist, NGINX could not distinguish approved and unapproved clients.
+- **Decision:** Remove source-CIDR filtering and continue without a host firewall or client authentication. Accept access by any client able to route to the listener.
 
 #### OQ-19 — Docker Desktop resource and update policy (OPEN)
 
@@ -831,7 +831,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-10   | Host profile           | Dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage, Docker Desktop and a dedicated service account; automatic recovery remains to be demonstrated. |
 | D-15   | macOS storage          | Use a Docker named volume in Docker Desktop's APFS-backed VM disk image; Docker/administrative access from macOS satisfies the visibility requirement. |
 | D-16   | Runtime identity       | Prefer non-root; UID 0 requires explicit approval and the constrained security model defined by OQ-21. |
-| D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` and permit `192.168.0.0/16`; no additional v1 client authentication.                                                       |
+| D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` with server-authenticated TLS and no source-CIDR filtering or client authentication. Any route-reachable client may request packages. |
 | D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |
 | D-13   | Secret delivery        | Inject the Jamf client secret into the helper from a root-owned mode-`0600` host environment file outside Git.                                                   |
 | D-14   | Outbound network       | Use direct validated HTTPS without an outbound proxy or TLS inspection.                                                                                          |
@@ -855,9 +855,9 @@ Resolve the remaining questions in this order because each answer constrains the
 
 2.  Capture actual client GET/HEAD/Range behaviour and workload scale (OQ-03 and OQ-05).
 
-3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 network controls (OQ-06).
+3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 TLS-only service boundary (OQ-06).
 
-4.  Set the SLO and cleanup policy, then close the startup, storage qualification, source-address, Docker policy, recovery and runtime-identity evidence (OQ-04, OQ-07 and OQ-16 through OQ-21).
+4.  Set the SLO and cleanup policy, then close the startup, storage qualification, Docker policy, recovery and runtime-identity evidence (OQ-04, OQ-07, OQ-16, OQ-17 and OQ-19 through OQ-21).
 
 5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 
