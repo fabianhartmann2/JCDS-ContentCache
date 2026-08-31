@@ -103,7 +103,11 @@ func run() error {
 					continue
 				}
 				if result.Triggered {
-					slog.Info("cache cleanup completed", "removed_files", result.RemovedFiles, "removed_bytes", result.RemovedBytes)
+					if result.TargetReached {
+						slog.Info("cache cleanup target reached", "removed_files", result.RemovedFiles, "removed_bytes", result.RemovedBytes)
+					} else {
+						slog.Warn("cache cleanup target not reached", "removed_files", result.RemovedFiles, "removed_bytes", result.RemovedBytes)
+					}
 				}
 			}
 		}

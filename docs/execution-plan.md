@@ -156,7 +156,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Issue the initial certificate through manual DNS validation and establish an automated renewal method before production approval.
 - [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
-- [ ] Exercise cleanup under controlled disk pressure and record operator acceptance evidence.
+- [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
 - [ ] Connect logs, metrics and alerts to the selected monitoring platform.
 - [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
 - [ ] Add backup/rebuild expectations and a tested disaster-recovery procedure.
@@ -210,7 +210,7 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
-| OQ-07 | Store capacity and retention | High | ACCEPTANCE PENDING | Configurable 90-day default; cleanup below 30% free, oldest inactive first, recover to 35%; restricted access index and audit | Run controlled disk-pressure acceptance test |
+| OQ-07 | Store capacity and retention | High | RESOLVED FOR PILOT | Configurable 90-day default; cleanup below 30% free, oldest inactive first, recover to 35%; restricted persistent access index and audit; isolated target-Mac acceptance passed | Monitor real capacity behavior during pilot |
 | OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS without source-CIDR filtering or client authentication | Explicitly accepted route-reachable access and package exposure |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |

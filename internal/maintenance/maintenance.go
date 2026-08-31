@@ -166,9 +166,10 @@ type Cleaner struct {
 }
 
 type Result struct {
-	Triggered    bool
-	RemovedFiles int
-	RemovedBytes int64
+	Triggered     bool
+	TargetReached bool
+	RemovedFiles  int
+	RemovedBytes  int64
 }
 
 type candidate struct {
@@ -247,6 +248,7 @@ func (c *Cleaner) Run() (Result, error) {
 	if err := c.Index.Flush(); err != nil {
 		return result, err
 	}
+	result.TargetReached = result.RemovedBytes >= needed
 	return result, nil
 }
 

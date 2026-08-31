@@ -101,7 +101,7 @@ func TestCleanerDeletesOldestEligibleFilesToTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Triggered || result.RemovedFiles != 2 || result.RemovedBytes != 60 {
+	if !result.Triggered || !result.TargetReached || result.RemovedFiles != 2 || result.RemovedBytes != 60 {
 		t.Fatalf("unexpected cleanup result: %+v", result)
 	}
 	for _, name := range []string{"Oldest.pkg", "Old.pkg"} {
@@ -113,6 +113,31 @@ func TestCleanerDeletesOldestEligibleFilesToTarget(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
 			t.Fatalf("%s should remain: %v", name, err)
 		}
+	}
+}
+
+func TestCleanerReportsTargetNotReachedWhenNoEligibleFileExists(t *testing.T) {
+	root := t.TempDir()
+	maintenanceRoot := t.TempDir()
+	index, err := LoadIndex(filepath.Join(maintenanceRoot, "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaner := &Cleaner{
+		StoreRoot:      root,
+		AuditPath:      filepath.Join(maintenanceRoot, "audit.jsonl"),
+		Retention:      90 * 24 * time.Hour,
+		TriggerPercent: 30,
+		TargetPercent:  35,
+		Index:          index,
+		Space:          func(string) (int64, int64, error) { return 290, 1000, nil },
+	}
+	result, err := cleaner.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Triggered || result.TargetReached || result.RemovedFiles != 0 {
+		t.Fatalf("unexpected exhausted-cleanup result: %+v", result)
 	}
 }
 
