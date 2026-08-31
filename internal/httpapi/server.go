@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	packagePathPrefix       = "/packages/"
-	jamfPackagePathPrefix   = "/Packages/"
+	packagePathPrefix     = "/packages/"
+	jamfPackagePathPrefix = "/Packages/"
 )
 
 type objectSource interface {
