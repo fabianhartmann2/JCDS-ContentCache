@@ -28,13 +28,29 @@ openssl req \
   >/dev/null 2>&1
 chmod 0600 "${tls_directory}/privkey.pem"
 
+monitoring_directory="${temporary_directory}/monitoring"
+mkdir -p "${monitoring_directory}"
+webhook_secret="${monitoring_directory}/webhook-hmac.secret"
+openssl rand -hex 32 >"${webhook_secret}"
+chmod 0600 "${webhook_secret}"
+cp "${tls_directory}/fullchain.pem" "${monitoring_directory}/fullchain.pem"
+chmod 0644 "${monitoring_directory}/fullchain.pem"
+
 export JCDS_MAC_PROD_HELPER_ENV_FILE="${helper_environment}"
 export JCDS_MAC_PROD_TLS_DIR="${tls_directory}"
 export JCDS_MAC_PROD_LISTEN_IP=127.0.0.1
 export JCDS_MAC_PROD_LISTEN_PORT=18443
 export JCDS_MAC_PROD_IMAGE_TAG=ci
+export JCDS_METRICS_WEBHOOK_URL=https://monitoring.example.invalid/jcds-cache
+export JCDS_METRICS_WEBHOOK_ALLOWED_HOSTS=monitoring.example.invalid
+export JCDS_METRICS_RUNTIME_DIR="${monitoring_directory}"
+export JCDS_METRICS_INSTANCE_NAME="CI cache"
 
 docker compose --file "${compose_file}" config --quiet
+docker compose \
+  --file "${compose_file}" \
+  --file "${repository_root}/deploy/macos-production/compose.monitoring.yaml" \
+  config --quiet
 
 if grep -q 'allow 192\.168\.0\.0/16' "${repository_root}/deploy/macos-production/nginx.conf"; then
   echo "The macOS production profile must not claim ineffective source-CIDR enforcement behind Docker Desktop" >&2
@@ -72,6 +88,15 @@ docker compose --file "${compose_file}" run --rm --no-deps \
     test "$(id -g)" -eq 0
     test -w /srv/jamf-store/packages
     test -w /srv/jamf-maintenance
+  '
+
+docker compose \
+  --file "${compose_file}" \
+  --file "${repository_root}/deploy/macos-production/compose.monitoring.yaml" \
+  run --rm --no-deps --entrypoint /bin/sh cache-maintainer -eu -c '
+    test -r /run/monitoring/webhook-hmac.secret
+    test -r /run/monitoring/fullchain.pem
+    test ! -e /run/monitoring/privkey.pem
   '
 
 # Start the actual non-root helper so its Store.New path proves that a
@@ -114,4 +139,4 @@ docker run --rm \
   "jcds-content-cache-nginx:${JCDS_MAC_PROD_IMAGE_TAG}" \
   nginx -t
 
-echo "macOS production profile smoke test passed: Compose, non-root helper/maintainer volume writes, baked NGINX, and TLS paths are valid."
+echo "macOS production profile smoke test passed: Compose, non-root volume writes, webhook public-certificate/secret mounts, baked NGINX, and TLS paths are valid."

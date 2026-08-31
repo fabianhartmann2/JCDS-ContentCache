@@ -32,6 +32,13 @@ func TestParseAccessEvent(t *testing.T) {
 	}
 }
 
+func TestParseTelemetryEventIncludesFailuresWithoutIndexingThem(t *testing.T) {
+	event, filename, ok := ParseTelemetryEvent([]byte(`{"status":502,"uri":"/packages/Example.pkg","source":"","bytes_sent":18,"range_kind":"none","completion":"complete"}`))
+	if !ok || filename != "" || event.Status != 502 || event.BytesSent != 18 {
+		t.Fatalf("unexpected telemetry parse: event=%+v filename=%q ok=%v", event, filename, ok)
+	}
+}
+
 func TestIndexPersistsNewestAccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "access-index.json")
 	index, err := LoadIndex(path)

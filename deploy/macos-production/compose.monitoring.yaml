@@ -1,0 +1,30 @@
+services:
+  cache-maintainer:
+    environment:
+      METRICS_WEBHOOK_ENABLED: "true"
+      METRICS_WEBHOOK_URL: ${JCDS_METRICS_WEBHOOK_URL:?Set the exact HTTPS webhook URL}
+      METRICS_WEBHOOK_ALLOWED_HOSTS: ${JCDS_METRICS_WEBHOOK_ALLOWED_HOSTS:?Set the exact receiver hostname allowlist}
+      METRICS_WEBHOOK_ALLOW_PRIVATE_IPS: ${JCDS_METRICS_WEBHOOK_ALLOW_PRIVATE_IPS:-false}
+      METRICS_WEBHOOK_INTERVAL: ${JCDS_METRICS_WEBHOOK_INTERVAL:-60s}
+      METRICS_WEBHOOK_TIMEOUT: ${JCDS_METRICS_WEBHOOK_TIMEOUT:-10s}
+      METRICS_WEBHOOK_MAX_ATTEMPTS: ${JCDS_METRICS_WEBHOOK_MAX_ATTEMPTS:-3}
+      METRICS_WEBHOOK_AUTH_MODE: ${JCDS_METRICS_WEBHOOK_AUTH_MODE:-hmac}
+      METRICS_WEBHOOK_HMAC_SECRET_FILE: /run/monitoring/webhook-hmac.secret
+      METRICS_INSTANCE_NAME: ${JCDS_METRICS_INSTANCE_NAME:?Set a stable operator-friendly name}
+      METRICS_INSTANCE_UUID: ${JCDS_METRICS_INSTANCE_UUID:-}
+      METRICS_INSTANCE_FQDN: ${JCDS_METRICS_INSTANCE_FQDN:-jcds-cache.appfruit.ch}
+      METRICS_INSTANCE_VERSION: ${JCDS_METRICS_INSTANCE_VERSION:-unknown}
+      METRICS_INSTANCE_COMMIT: ${JCDS_METRICS_INSTANCE_COMMIT:-unknown}
+      METRICS_PACKAGE_INVENTORY: ${JCDS_METRICS_PACKAGE_INVENTORY:-summary}
+      METRICS_PACKAGE_INVENTORY_MAX_ITEMS: ${JCDS_METRICS_PACKAGE_INVENTORY_MAX_ITEMS:-5000}
+      METRICS_TLS_CERT_FILE: /run/monitoring/fullchain.pem
+      METRICS_TLS_WARNING_BEFORE: ${JCDS_METRICS_TLS_WARNING_BEFORE:-720h}
+      METRICS_TLS_CRITICAL_BEFORE: ${JCDS_METRICS_TLS_CRITICAL_BEFORE:-336h}
+      METRICS_HEALTH_URL: http://nginx:8080/health/ready
+    volumes:
+      - type: bind
+        source: ${JCDS_METRICS_RUNTIME_DIR:?Set the absolute path of the protected monitoring runtime directory}
+        target: /run/monitoring
+        read_only: true
+        bind:
+          create_host_path: false

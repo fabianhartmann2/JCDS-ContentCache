@@ -615,7 +615,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 The baseline NGINX behavior-log schema and privacy boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata, but it must not reintroduce the excluded URI, package identity, raw headers, credentials or signed URLs.
 
-The approved reporting direction is an optional periodic HTTPS webhook sender
+The implemented reporting integration is an optional periodic HTTPS webhook sender
 inside the existing cache-maintainer. Its versioned contract, configurable
 interval, stable identity, inventory modes, transport controls, failure
 isolation and acceptance tests are defined in

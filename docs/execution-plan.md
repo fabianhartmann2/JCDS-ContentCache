@@ -165,9 +165,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
-- [ ] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
-- [ ] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
-- [ ] Add exact receiver-host validation, redirect rejection, bounded retry/spooling and the selected HMAC/bearer/mTLS authentication.
+- [x] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
+- [x] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
+- [x] Add exact receiver-host validation, redirect rejection, bounded in-memory retry and HMAC authentication.
 - [ ] Connect webhook snapshots and sanitized logs to the selected monitoring platform.
 - [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
 - [ ] Retain an external HTTPS probe because an in-container snapshot cannot prove managed-client reachability or macOS/Docker Desktop health.
@@ -229,7 +229,7 @@ implementation or production gate.
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
-| OQ-10 | Monitoring and alerting platform | Medium | DESIGN APPROVED; IMPLEMENTATION PENDING | Existing cache-maintainer sends configurable periodic HTTPS snapshots; webhook failure is isolated from serving and cleanup | Receiver/owner, HMAC vs bearer/mTLS, allowlist, retention, alerts and implementation evidence |
+| OQ-10 | Monitoring and alerting platform | Medium | SENDER IMPLEMENTED; ACCEPTANCE PENDING | Existing cache-maintainer sends configurable periodic HTTPS snapshots; webhook failure is isolated from serving and cleanup | Receiver/owner, allowlist, retention, alerts and target-Mac implementation evidence |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |

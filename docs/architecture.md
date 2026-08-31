@@ -44,7 +44,7 @@ representation backing that container path is a separate production decision.
 | NGINX | TLS termination, client method/path controls, local static delivery, miss routing and privacy-safe request telemetry |
 | Go helper | OAuth, Jamf catalog/resolver access, destination validation, one-transfer in-flight fan-out, SHA3-512/length verification and atomic publication |
 | Package-store volume | Immutable completed packages and hidden same-filesystem temporary downloads |
-| Cache maintainer | Restricted access index, capacity cleanup and the planned decoupled webhook snapshot reporter |
+| Cache maintainer | Restricted access index, capacity cleanup and the optional decoupled webhook snapshot reporter |
 | Operations integration | Webhook receiver, external reachability, alerts, certificate expiry, host capacity, controlled updates and recovery |
 
 ## 4. Security boundaries
@@ -131,7 +131,8 @@ server platform.
 | AD-14 | Coalesce concurrent full GET misses into one JCDS transfer and stream followers from the growing private temporary file; Range followers wait for verified publication. |
 
 The reporter design, payload and privacy boundary are specified in
-`docs/webhook-monitoring.md`. It is not yet implemented. It intentionally does
+`docs/webhook-monitoring.md`. Phase 1 is implemented behind an explicit
+Compose override and remains disabled by default. It intentionally does
 not receive the Docker socket; macOS, Docker Desktop and real client
 reachability require host-side or external observation.
 

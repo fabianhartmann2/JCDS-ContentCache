@@ -128,17 +128,46 @@ func (i *Index) Flush() error {
 }
 
 type AccessEvent struct {
-	Status int    `json:"status"`
-	URI    string `json:"uri"`
+	Status         int     `json:"status"`
+	URI            string  `json:"uri"`
+	Source         string  `json:"source"`
+	BytesSent      int64   `json:"bytes_sent"`
+	RequestSeconds float64 `json:"request_seconds"`
+	RangeKind      string  `json:"range_kind"`
+	Completion     string  `json:"completion"`
+}
+
+type TelemetryEvent = AccessEvent
+
+func ParseTelemetryEvent(message []byte) (TelemetryEvent, string, bool) {
+	start := strings.IndexByte(string(message), '{')
+	if start < 0 {
+		return TelemetryEvent{}, "", false
+	}
+	var event TelemetryEvent
+	if json.Unmarshal(message[start:], &event) != nil {
+		return TelemetryEvent{}, "", false
+	}
+	parsed, err := url.ParseRequestURI(event.URI)
+	if err != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(!strings.HasPrefix(parsed.Path, "/packages/") && !strings.HasPrefix(parsed.Path, "/Packages/")) {
+		return TelemetryEvent{}, "", false
+	}
+	filename, _ := packageFilename(event)
+	return event, filename, true
 }
 
 func ParseAccessEvent(message []byte) (string, bool) {
+	var event AccessEvent
 	start := strings.IndexByte(string(message), '{')
-	if start < 0 {
+	if start < 0 || json.Unmarshal(message[start:], &event) != nil {
 		return "", false
 	}
-	var event AccessEvent
-	if json.Unmarshal(message[start:], &event) != nil || (event.Status != 200 && event.Status != 206) {
+	return packageFilename(event)
+}
+
+func packageFilename(event AccessEvent) (string, bool) {
+	if event.Status != 200 && event.Status != 206 {
 		return "", false
 	}
 	parsed, err := url.ParseRequestURI(event.URI)

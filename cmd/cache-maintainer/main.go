@@ -39,6 +39,8 @@ func run() error {
 		TargetPercent:  cfg.TargetPercent,
 		Index:          index,
 	}
+	traffic := maintenance.NewTrafficCollector(time.Now())
+	cleanupTracker := maintenance.NewCleanupTracker(cfg.Retention)
 	packet, err := net.ListenPacket("udp", cfg.UDPListen)
 	if err != nil {
 		return err
@@ -59,7 +61,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var wait sync.WaitGroup
-	wait.Add(3)
+	wait.Add(4)
 	go func() {
 		defer wait.Done()
 		buffer := make([]byte, 4096)
@@ -77,17 +79,20 @@ func run() error {
 				}
 				return
 			}
-			if filename, ok := maintenance.ParseAccessEvent(buffer[:count]); ok {
-				_ = index.Record(filename, time.Now())
+			if event, filename, ok := maintenance.ParseTelemetryEvent(buffer[:count]); ok {
+				traffic.Record(event)
+				if filename != "" {
+					_ = index.Record(filename, time.Now())
+				}
 			}
 		}
 	}()
 	go func() {
 		defer wait.Done()
 		flush := time.NewTicker(cfg.FlushInterval)
-		cleanup := time.NewTicker(cfg.CleanupInterval)
+		cleanupTicker := time.NewTicker(cfg.CleanupInterval)
 		defer flush.Stop()
-		defer cleanup.Stop()
+		defer cleanupTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -96,8 +101,9 @@ func run() error {
 				if err := index.Flush(); err != nil {
 					slog.Error("access index flush failed", "error", err)
 				}
-			case <-cleanup.C:
+			case <-cleanupTicker.C:
 				result, err := cleaner.Run()
+				cleanupTracker.Record(result, err, time.Now().UTC())
 				if err != nil {
 					slog.Error("cache cleanup failed", "error", err)
 					continue
@@ -111,6 +117,19 @@ func run() error {
 				}
 			}
 		}
+	}()
+	go func() {
+		defer wait.Done()
+		if cfg.Metrics.ConfigError != nil {
+			slog.Warn("webhook reporter disabled by invalid configuration", "error", cfg.Metrics.ConfigError)
+			return
+		}
+		reporter := &maintenance.Reporter{
+			Config: cfg.Metrics, StoreRoot: cfg.StoreRoot, Index: index,
+			TriggerPercent: cfg.TriggerPercent, TargetPercent: cfg.TargetPercent,
+			Traffic: traffic, Cleanup: cleanupTracker, Started: time.Now().UTC(),
+		}
+		reporter.Run(ctx)
 	}()
 	go func() {
 		defer wait.Done()

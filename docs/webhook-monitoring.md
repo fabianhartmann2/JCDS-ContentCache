@@ -1,12 +1,14 @@
-# Webhook monitoring concept
+# Webhook monitoring
 
-**Status:** Design approved; implementation pending  
-**Target component:** `cache-maintainer`  
+**Status:** Phase 1 implemented; target-Mac acceptance pending
+
+**Target component:** `cache-maintainer`
+
 **Last updated:** 31 August 2026
 
 ## 1. Purpose and boundary
 
-The production cache will extend the existing `cache-maintainer` with a
+The production cache extends the existing `cache-maintainer` with a
 periodic reporter. The reporter sends a current, privacy-bounded service
 snapshot to a dynamically configured HTTPS webhook. It does not participate in
 package delivery, cache publication, cleanup decisions or gateway readiness.
@@ -30,16 +32,16 @@ flowchart LR
     M -->|"Periodic HTTPS snapshot"| W["Approved webhook receiver"]
 ```
 
-NGINX's internal event schema must be extended with safe aggregate fields such
+NGINX's internal event schema carries safe aggregate fields such
 as source, status, byte count, latency and range classification. Helper
 failures that are not visible in those events need a bounded internal metrics
 snapshot or sanitized event path. Neither path may include a package URI,
 credential, token or signed URL.
 
-## 3. Proposed configuration
+## 3. Configuration
 
-The names below define the implementation contract; they are not active in the
-current production image.
+The names below define the implemented contract. Reporting is activated only
+when `deploy/macos-production/compose.monitoring.yaml` is included.
 
 | Variable | Default | Purpose |
 |---|---:|---|
@@ -48,16 +50,21 @@ current production image.
 | `METRICS_WEBHOOK_INTERVAL` | `60s` | Snapshot interval |
 | `METRICS_WEBHOOK_TIMEOUT` | `10s` | Per-attempt request timeout |
 | `METRICS_WEBHOOK_ALLOWED_HOSTS` | empty | Comma-separated exact receiver hostnames |
-| `METRICS_WEBHOOK_AUTH_MODE` | `none` | Planned values: `none`, `hmac`, or an approved alternative |
+| `METRICS_WEBHOOK_ALLOW_PRIVATE_IPS` | `false` | Explicitly allow an approved receiver in private address space |
+| `METRICS_WEBHOOK_AUTH_MODE` | `none` | Implemented values: `none` or `hmac` |
 | `METRICS_WEBHOOK_HMAC_SECRET_FILE` | empty | Preferred protected-file reference for HMAC mode |
+| `METRICS_WEBHOOK_MAX_ATTEMPTS` | `3` | Total attempts per snapshot; valid range 1–5 |
 | `METRICS_INSTANCE_NAME` | empty | Operator-friendly cache name |
 | `METRICS_INSTANCE_UUID` | generated | Explicit stable UUID or persisted generated UUID |
 | `METRICS_INSTANCE_FQDN` | empty | Client-facing FQDN |
+| `METRICS_INSTANCE_VERSION` | `unknown` | Deployed application version |
+| `METRICS_INSTANCE_COMMIT` | `unknown` | Reviewed Git revision |
 | `METRICS_PACKAGE_INVENTORY` | `summary` | `none`, `summary`, or `full` |
 | `METRICS_PACKAGE_INVENTORY_MAX_ITEMS` | `5000` | Hard cap in `full` mode |
 | `METRICS_TLS_CERT_FILE` | empty | Read-only public certificate or full-chain PEM inspected by the reporter |
 | `METRICS_TLS_WARNING_BEFORE` | `720h` | Warning threshold; 30 days by default |
 | `METRICS_TLS_CRITICAL_BEFORE` | `336h` | Critical threshold; 14 days by default |
+| `METRICS_HEALTH_URL` | `http://nginx:8080/health/ready` | Private gateway readiness endpoint |
 
 If no UUID is configured, the maintainer generates one once and stores it with
 mode `0600` in the maintenance volume, for example at
@@ -65,6 +72,10 @@ mode `0600` in the maintenance volume, for example at
 identity. A missing URL, allowlist or required authentication secret while the
 feature is enabled is a startup configuration error for the reporter, but must
 not disable cache delivery or cleanup.
+
+The HMAC secret must be a regular file containing at least 32 bytes and must
+not be readable by group or other users. It is re-read for each snapshot so a
+protected atomic file replacement can rotate it without rebuilding the image.
 
 The maintainer receives only the public certificate or full-chain PEM through
 a dedicated read-only mount. It must never receive or mount the TLS private
@@ -132,14 +143,14 @@ unknown fields as forward-compatible additions.
     "hit_ratio": 0.8,
     "bytes_served": 123456789,
     "bytes_downloaded": 23456789,
+    "request_seconds_total": 6.2,
+    "request_seconds_average": 0.248,
+    "request_seconds_max": 1.617,
     "status_2xx": 24,
     "status_4xx": 1,
     "status_5xx": 0,
     "range_requests": 3,
-    "active_fills": 0,
-    "failures": 0,
-    "integrity_failures": 0,
-    "capacity_failures": 0
+    "failures": 0
   },
   "cleanup": {
     "retention_seconds": 7776000,
@@ -155,8 +166,8 @@ unknown fields as forward-compatible additions.
 }
 ```
 
-Counters should be monotonic since maintainer start unless their names specify
-a reporting window. `event_id` supports receiver deduplication; `sequence`
+Traffic counters cover the interval since the previous snapshot. Cleanup
+totals are monotonic since maintainer start. `event_id` supports receiver deduplication; `sequence`
 helps detect missed or reordered snapshots. Cleanup result values are
 `not_required`, `target_reached`, `target_not_reached`, and `failed`.
 
@@ -188,10 +199,11 @@ authentication material.
 ## 6. Transport, authentication and failure behavior
 
 - Accept HTTPS only, reject redirects and require an exact hostname allowlist.
-- Apply the same DNS/private-address and SSRF protections used for controlled
+- Resolve and dial the validated destination directly, without ambient proxy
+  settings. Apply the same DNS/private-address and SSRF protections used for controlled
   outbound package requests, with explicit approval for the receiver's address
   class where necessary.
-- Use a short timeout and bounded exponential retry with jitter.
+- Use a short timeout and bounded exponential retry.
 - Keep only the newest unsent snapshot, or a small explicitly bounded spool;
   monitoring loss must not consume unbounded memory or disk.
 - A non-2xx response, timeout or TLS/authentication failure increments reporter
@@ -199,10 +211,10 @@ authentication material.
 - Never block package delivery, cleanup, readiness or container health because
   the webhook is unavailable.
 
-HMAC-SHA256 is the recommended authentication mode. The sender would include
-`X-JCDS-Timestamp`, an idempotency/event identifier and
-`X-JCDS-Signature: sha256=<digest>`, calculated over a documented canonical
-combination of timestamp and raw JSON body. The receiver must enforce a clock
+HMAC-SHA256 is the implemented and recommended authentication mode. The sender
+includes `X-JCDS-Timestamp`, `X-JCDS-Event-ID` and
+`X-JCDS-Signature: sha256=<digest>`, calculated over
+`timestamp + "\n" + raw JSON body`. The receiver must enforce a clock
 window and deduplicate event IDs. The final receiver and authentication method
 remain operational decisions; bearer tokens or mTLS may be selected if the
 enterprise platform requires them.
@@ -223,7 +235,7 @@ enterprise platform requires them.
 
 ## 8. Acceptance tests
 
-Implementation is complete only after automated and target-Mac evidence proves:
+Automated tests and final target-Mac evidence must prove:
 
 1. the feature is disabled by default and requires no webhook configuration;
 2. interval, timeout, identity and inventory mode validation fail safely;
@@ -240,11 +252,52 @@ Implementation is complete only after automated and target-Mac evidence proves:
     the certificate actually served to a real client and distinguishes
     container self-health from real client reachability.
 
-## 9. Remaining decisions
+## 9. Enable the reporter
+
+Create a dedicated monitoring directory outside the checkout, copy only the
+public certificate into it and generate the HMAC secret:
+
+```bash
+umask 077
+monitoring_dir="${HOME}/JCDS-ContentCache-runtime/monitoring"
+mkdir -p "${monitoring_dir}"
+cp "${JCDS_MAC_PROD_TLS_DIR}/fullchain.pem" \
+  "${monitoring_dir}/fullchain.pem"
+chmod 0644 "${monitoring_dir}/fullchain.pem"
+openssl rand -hex 32 >"${monitoring_dir}/webhook-hmac.secret"
+chmod 0600 "${monitoring_dir}/webhook-hmac.secret"
+```
+
+Set the `JCDS_METRICS_*` values in the private deployment environment file and
+start the stack with both Compose files:
+
+```bash
+docker compose \
+  --env-file "${deployment_env}" \
+  --file deploy/macos-production/compose.yaml \
+  --file deploy/macos-production/compose.monitoring.yaml \
+  up --build --detach --force-recreate
+```
+
+Omitting the override leaves reporting disabled. Invalid optional reporter
+configuration is logged and disables only reporting; maintainer health, the
+access index and cleanup remain operational. Set `JCDS_METRICS_RUNTIME_DIR` to
+the directory created above. Docker mounts it read-only. Only the copied public
+`fullchain.pem` and dedicated HMAC secret are visible; the TLS private key is
+not visible to the maintainer. Refresh the public copy whenever the NGINX
+certificate is renewed.
+
+Phase 1 reports request totals, source, bytes, status class, range use and
+completion failures from NGINX. Helper-internal counters such as token refresh,
+digest failure and exact active-fill concurrency require a future bounded
+helper metrics endpoint and are not emitted as misleading zero values.
+
+## 10. Remaining decisions
 
 - webhook receiver product, endpoint owner and retention policy;
 - HMAC, bearer token or mTLS authentication and secret-rotation owner;
 - receiver hostname/address allowlist and enterprise trust chain;
 - alert recipients, thresholds and escalation path;
 - whether `full` inventory is permitted in production; and
-- bounded retry/spool limits and receiver rate limits.
+- receiver rate limits and whether a bounded disk spool is required; phase 1
+  retries the current snapshot in memory and retains no backlog.

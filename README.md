@@ -122,12 +122,13 @@ docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
 
 See [Client request monitoring](docs/client-request-monitoring.md) for the schema, privacy boundary, request classifications, example analyses, proxy caveats, and production guidance.
 
-A planned extension will let the existing cache-maintainer send a periodic,
+The optional monitoring integration lets the existing cache-maintainer send a periodic,
 privacy-bounded service snapshot to a configurable HTTPS webhook. The reporter
 is disabled by default and is deliberately decoupled from delivery, cleanup and
-readiness. See [Webhook monitoring concept](docs/webhook-monitoring.md) for the
-proposed payload, configuration, security controls and acceptance gates. It is
-not implemented in the current production image.
+readiness. It is enabled with the separate
+`deploy/macos-production/compose.monitoring.yaml` override. See
+[Webhook monitoring](docs/webhook-monitoring.md) for the implemented payload,
+configuration, security controls and remaining acceptance gates.
 
 ## Sanitized live-contract capture
 

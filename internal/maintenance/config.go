@@ -20,6 +20,7 @@ type Config struct {
 	FlushInterval   time.Duration
 	TriggerPercent  float64
 	TargetPercent   float64
+	Metrics         MetricsConfig
 }
 
 func LoadConfig() (Config, error) {
@@ -48,6 +49,13 @@ func LoadConfig() (Config, error) {
 	}
 	if strings.TrimSpace(c.UDPListen) == "" || strings.TrimSpace(c.HTTPListen) == "" || c.Retention <= 0 || c.CleanupInterval <= 0 || c.FlushInterval <= 0 || c.TriggerPercent < 0 || c.TargetPercent <= c.TriggerPercent || c.TargetPercent >= 100 {
 		return Config{}, errors.New("invalid cache-maintainer configuration")
+	}
+	c.Metrics, err = loadMetricsConfig()
+	if err != nil {
+		// Reporting is deliberately fail-open: invalid optional monitoring must
+		// never prevent cleanup, health endpoints or package delivery.
+		c.Metrics.ConfigError = err
+		c.Metrics.Enabled = false
 	}
 	return c, nil
 }
