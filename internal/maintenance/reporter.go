@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
@@ -377,8 +378,15 @@ func readHMACSecret(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("HMAC secret is not a regular file")
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("HMAC secret must not be group- or world-accessible")
+	permissions := info.Mode().Perm()
+	if permissions&0o007 != 0 || permissions&0o030 != 0 {
+		return nil, errors.New("HMAC secret has unsafe group or other permissions")
+	}
+	if permissions&0o040 != 0 {
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || int(stat.Gid) != os.Getegid() {
+			return nil, errors.New("HMAC secret group does not match the process group")
+		}
 	}
 	secret, err := os.ReadFile(path)
 	if err != nil {

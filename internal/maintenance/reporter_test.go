@@ -81,6 +81,12 @@ func TestHMACSecretRequiresRestrictedRegularFile(t *testing.T) {
 	if _, err := readHMACSecret(path); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readHMACSecret(path); err != nil {
+		t.Fatalf("matching process-group read access should be accepted: %v", err)
+	}
 }
 
 func TestStableInstanceIDPersistsWithRestrictedMode(t *testing.T) {

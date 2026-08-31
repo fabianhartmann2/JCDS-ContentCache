@@ -73,9 +73,11 @@ identity. A missing URL, allowlist or required authentication secret while the
 feature is enabled is a startup configuration error for the reporter, but must
 not disable cache delivery or cleanup.
 
-The HMAC secret must be a regular file containing at least 32 bytes and must
-not be readable by group or other users. It is re-read for each snapshot so a
-protected atomic file replacement can rotate it without rebuilding the image.
+The HMAC secret must be a regular file containing at least 32 bytes. It may be
+owner-only or group-readable only when the file group exactly matches the
+maintainer's effective GID `0`; group write/execute and all `other` permissions
+are rejected. It is re-read for each snapshot so a protected atomic file
+replacement can rotate it without rebuilding the image.
 
 The maintainer receives only the public certificate or full-chain PEM through
 a dedicated read-only mount. It must never receive or mount the TLS private
@@ -265,7 +267,10 @@ cp "${JCDS_MAC_PROD_TLS_DIR}/fullchain.pem" \
   "${monitoring_dir}/fullchain.pem"
 chmod 0644 "${monitoring_dir}/fullchain.pem"
 openssl rand -hex 32 >"${monitoring_dir}/webhook-hmac.secret"
-chmod 0600 "${monitoring_dir}/webhook-hmac.secret"
+sudo chgrp 0 "${monitoring_dir}" \
+  "${monitoring_dir}/webhook-hmac.secret"
+chmod 0750 "${monitoring_dir}"
+chmod 0640 "${monitoring_dir}/webhook-hmac.secret"
 ```
 
 Set the `JCDS_METRICS_*` values in the private deployment environment file and
