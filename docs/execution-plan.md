@@ -27,7 +27,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Client namespace | `https://<server>:8443/packages/<filename>.pkg` |
 | V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
 | Initial client population | 500–2,000 managed Macs |
-| Initial usable cache storage | 500 GB–1 TB, retaining 20% operational headroom |
+| Initial package working set | Approximately 500–600 GB, retaining at least 30% package-store free space |
 | Host baseline | Dedicated Mac on a supported macOS release; exact hardware and resources remain open |
 | Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
 | Client access | Server-authenticated TLS with no source-CIDR filtering or client authentication; any route-reachable client may request packages |
@@ -209,7 +209,7 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
-| OQ-07 | Store capacity and retention | High | IN REVIEW | Provision 500 GB–1 TB usable cache storage and retain 20% headroom; retention/eviction policy remains open | Inventory growth, reuse interval, and operational cleanup policy |
+| OQ-07 | Store capacity and retention | High | IN REVIEW | Plan 500–600 GB cache; cleanup below 30% free, oldest inactive first, recover to 35% | Choose inactivity window `X`; implement restricted last-access index and safe cleanup |
 | OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS without source-CIDR filtering or client authentication | Explicitly accepted route-reachable access and package exposure |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
@@ -217,11 +217,11 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
-| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | Dedicated account; fully automatic recovery required | Startup mechanism plus cold-boot and update-recovery evidence |
+| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |
 | OQ-17 | Production storage backing | Blocking | RESOLVED | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient | Qualify sizing, atomicity, permissions, restart, reboot and recovery |
 | OQ-18 | NGINX access enforcement/client IP | Blocking | RESOLVED | Docker Desktop masks clients as `192.168.65.1`; source filtering removed and unrestricted route-level access accepted | Live LAN evidence captured on 2026-08-31 |
-| OQ-19 | Docker Desktop resources and updates | High | OPEN | Disable Resource Saver and manage fixed resources/maintenance windows | Managed settings and update ownership |
-| OQ-20 | Cache backup/rebuild policy | Medium | OPEN | Rebuild package bytes from JCDS; protect configuration and certificates | Recovery owner and empty-cache recovery test |
+| OQ-19 | Docker Desktop resources and updates | High | IN REVIEW | Service owner configures settings; Resource Saver remains disabled and updates controlled | Record final values and update owner |
+| OQ-20 | Cache backup/rebuild policy | Medium | IN REVIEW | No package backup; rebuild from JCDS and protect configuration/TLS/runbooks | Pass intentional empty-volume recovery test |
 | OQ-21 | Production helper UID model | Blocking | RESOLVED | UID 65532 with primary GID 0 and all capabilities dropped; no UID-0 exception required | Real target-Mac fill, publication, restart and recovery passed |
 
 ## 6. Definition of ready for coding
@@ -304,8 +304,8 @@ The first coding milestone is a local, credential-free demonstration using mock 
 
 ## 10. Immediate next actions
 
-1. Resolve Docker resource/update policy, backup/rebuild, certificate-renewal, retention, SLO and monitoring ownership before the controlled production pilot.
-2. Close the remaining OQ-17 disk-sizing, reboot, Docker Desktop update and destructive-recovery evidence.
+1. Choose retention inactivity window `X` and implement the restricted last-access index plus conditional cleanup.
+2. Record the service-owner Docker Desktop settings and implement/test empty-volume recovery.
 3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
-5. Complete the explicitly deferred OQ-16 unattended reboot/session recovery test before pilot approval.
+5. Implement the LaunchAgent controller and complete the explicitly deferred OQ-16 unattended reboot/session recovery test before pilot approval.

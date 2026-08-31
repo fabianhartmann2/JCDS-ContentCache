@@ -1,0 +1,182 @@
+# Production readiness plan
+
+**Status:** Active plan
+
+**Target:** Dedicated Mac mini running licensed Docker Desktop
+
+**Last updated:** 31 August 2026
+
+This document is the retained plan for moving the validated macOS production
+candidate to production approval. Completed technical evidence is recorded in
+[`macos-production-validation-2026-08-31.md`](macos-production-validation-2026-08-31.md).
+
+## 1. Unattended Mac recovery
+
+### Confirmed prerequisite
+
+FileVault and dedicated-account login behavior is handled outside this
+repository and is confirmed as resolved by the service owner. The operational
+acceptance test must still demonstrate that the resulting login sequence makes
+the dedicated user's GUI session available after the approved reboot scenario.
+
+### Startup mechanism
+
+Use a managed per-user `LaunchAgent`, not a normal system `LaunchDaemon`, to
+start and supervise this Docker Desktop workload. Docker Desktop is a
+GUI-session application; a root LaunchDaemon does not by itself provide the
+required user bootstrap namespace and is therefore the wrong primary lifecycle
+mechanism.
+
+The planned idempotent controller performs this sequence:
+
+1. Run in the dedicated service account's GUI session at login.
+2. Start `/Applications/Docker.app` with `open -gja` if Docker Desktop is not
+   already running.
+3. Poll `docker info` with a bounded timeout until the Docker engine is ready.
+4. Run `docker compose up --detach` with the reviewed
+   `deploy/macos-production/compose.yaml` and protected deployment environment.
+5. Wait until `cache-helper` and `nginx` report healthy.
+6. Verify the trusted HTTPS readiness endpoint.
+7. Write a credential-free result to a protected operational log and return a
+   non-zero status on failure for monitoring or MDM collection.
+8. Repeat periodically or when invoked by management so recovery does not
+   depend only on the initial login event.
+
+Compose retains `restart: unless-stopped`; this restarts containers after the
+Docker engine returns. The LaunchAgent closes the remaining gap by starting
+Docker Desktop and reconciling the Compose application itself.
+
+### How reachability without manual intervention is achieved
+
+```mermaid
+flowchart TD
+    B["Approved Mac boot"] --> L["Dedicated user session"]
+    L --> A["Managed LaunchAgent"]
+    A --> D["Docker Desktop ready"]
+    D --> C["Compose reconciled"]
+    C --> H["HTTPS readiness verified"]
+```
+
+No operator action is required when every transition succeeds. A cold-boot
+test must capture timestamps for each transition and prove the service is
+reachable from a second Mac. The test is explicitly deferred; OQ-16 remains in
+review until it passes.
+
+## 2. Docker Desktop operating parameters
+
+The service owner will configure and own Docker Desktop CPU, memory, swap,
+disk-image size, Resource Saver and update behavior. The repository retains the
+requirements and acceptance checks, but does not manage these settings until
+the owner supplies the final values.
+
+Minimum retained requirements:
+
+- Resource Saver disabled for the always-on service;
+- enough Docker disk capacity for the approved cache budget plus headroom;
+- controlled Docker Desktop and macOS update windows;
+- health validation after every update;
+- settings and subscription ownership documented outside credential files.
+
+## 3. Storage and cache lifecycle
+
+### Capacity target for a 1 TB Mac
+
+A 1 TB Mac cannot provide a 1 TB usable package cache while also holding macOS,
+Docker images, logs, temporary downloads and recovery headroom. The planning
+target is:
+
+- approximately 500–600 GB usable package cache;
+- approximately 650–700 GB maximum Docker Desktop disk-image allocation;
+- at least 30 percent free space at the package-store filesystem boundary;
+- separate observation of host APFS free space and Docker filesystem free
+  space because either can become the limiting layer.
+
+These are planning defaults until the service owner supplies the final Docker
+Desktop settings and measured package distribution.
+
+### Low-disk and retention policy
+
+The selected policy is conditional cleanup:
+
+1. Trigger cleanup when package-store free space falls below 30 percent.
+2. Consider only completed package files not requested for `X` days; `X`
+   remains an explicit open decision.
+3. Delete eligible files in oldest-last-access order.
+4. Stop after free space reaches a recovery target above the trigger; the
+   recommended starting target is 35 percent.
+5. Never delete active `.part` files, unrelated files, symbolic links or files
+   involved in an active fill.
+6. If no eligible file remains, reject new fills through existing capacity
+   protection rather than breaching the free-space floor. Local files remain
+   available.
+
+Filesystem `atime` is not an acceptable source of truth: Docker and filesystem
+mount behavior may suppress or coarsen access-time updates, and NGINX `sendfile`
+does not provide a portable last-access contract. Accurate retention therefore
+requires a local access index.
+
+Planned implementation:
+
+- retain the privacy-safe standard NGINX log on stdout without package names;
+- write a separate, local-only maintenance access journal containing canonical
+  filename and timestamp;
+- store that journal/index in a restricted maintenance volume, never in normal
+  centralized request logs;
+- have a purpose-built cleanup command/service consume the index, validate each
+  candidate with `Lstat`, coordinate with active fills and remove only eligible
+  regular completed files;
+- define retention, rotation and permissions for the maintenance index before
+  enabling automatic deletion.
+
+Administrative inventory and ad-hoc deletion commands are deferred because the
+service owner does not currently require them. Automatic cleanup will still
+need internal inventory primitives to make safe decisions.
+
+## 4. Recovery from a deleted or damaged Docker volume
+
+Package bytes are derived data and may be rebuilt from JCDS. Configuration,
+certificate material, environment files, reviewed images/commit and runbooks
+are authoritative recovery inputs and must remain outside the package volume.
+
+### Deleted or intentionally recreated volume
+
+1. Confirm the exact Compose project and volume name.
+2. Stop the application without broad or wildcard deletion commands.
+3. Recreate the application with the reviewed Compose profile.
+4. `store-init` recreates `/srv/jamf-store/packages` and `.temporary` with the
+   approved permissions.
+5. Verify TLS readiness and an empty-cache real fill.
+6. Allow packages to repopulate on demand from JCDS.
+
+### Suspected corruption
+
+1. Stop writes by stopping `cache-helper`; preserve NGINX local reads when safe.
+2. Capture Docker diagnostics and the exact volume identity.
+3. Determine whether intact completed regular files can be trusted and
+   exported; do not serve or import partial or ambiguous objects.
+4. Obtain explicit approval before deleting or replacing the affected volume.
+5. Recreate an empty volume and validate a real fill, local hit and integrity
+   check.
+
+### Docker Desktop VM-disk loss or reset
+
+Reinstall or reset Docker Desktop as required, restore only configuration and
+TLS material from managed sources, check out the approved repository commit,
+recreate the Compose application and repopulate the cache. Package-volume
+backup is not required unless a future requirement makes pre-populated bytes
+authoritative.
+
+Recovery is not closed until an intentional empty-volume exercise proves the
+procedure without exposing credentials or using `docker compose down --volumes`
+against an unresolved project or volume target.
+
+## 5. Retained open decisions
+
+| ID | Decision or evidence still required |
+|---|---|
+| OQ-16 | Implement LaunchAgent controller and pass cold-boot-to-HTTPS recovery |
+| OQ-07 | Choose inactivity window `X` and approve 30% trigger / 35% target |
+| OQ-17 | Validate final disk sizing, macOS reboot, Docker update and volume recovery |
+| OQ-19 | Record service-owner Docker resource and update settings |
+| OQ-20 | Exercise empty-volume recovery and accept rebuild without package backup |
+| OQ-10 | Select monitoring platform, alert routing and retention |

@@ -128,7 +128,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Publication integrity  | Require exact JCDS catalog `length` and SHA3-512 match before a downloaded package is atomically published.                                                                 | Resolved            |
 | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
 | Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
-| Cache storage          | Provision 500 GB–1 TB of usable cache storage and retain at least 20 percent operational headroom.                                                                          | Resolved range      |
+| Cache storage          | Target an approximately 500–600 GB package working set on the 1 TB Mac and retain at least 30 percent package-store free space.                                             | In review           |
 | Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Use server-authenticated TLS without source-CIDR filtering or client authentication; any route-reachable client may request packages.                                      | Resolved            |
@@ -374,7 +374,7 @@ A local hit should add minimal application overhead and use the available host/n
 
 ### NFR-003 Scalability
 
-The first release must support 500–2,000 managed Macs, the measured active-download concurrency, package-size distribution and working-set capacity with at least 20 percent storage headroom. The design should permit later migration to larger storage or a redundant deployment.
+The first release must support 500–2,000 managed Macs, the measured active-download concurrency, package-size distribution and an approximately 500–600 GB working set while retaining at least 30 percent package-store free space. The design should permit later migration to larger storage or a redundant deployment.
 
 > **Priority: Must. Acceptance:** Capacity calculations and stress tests cover the agreed peak profile.
 
@@ -526,7 +526,7 @@ The paths above define the baseline layout and may be changed through configurat
 
 > **Initial sizing formula:** Usable package-store capacity should be at least the expected active package working set plus concurrent temporary-download allowance, multiplied by 1.20 for operational headroom. The final value must be calculated from actual JCDS package inventory and download demand.
 
-The first deployment must provide 500 GB–1 TB of usable cache storage. At least 20 percent must remain as operational headroom, so the planned active package working set should remain within approximately 400 GB–800 GB depending on the selected volume size. Package inventory, maximum object size and simultaneous-fill demand must still be measured before final host sizing and load-test limits are frozen.
+The first deployment targets an approximately 500–600 GB active package working set on the 1 TB Mac. At least 30 percent of the package-store filesystem must remain free. Package inventory, maximum object size and simultaneous-fill demand must still be measured before the Docker disk-image limit and load-test limits are frozen.
 
 ### 12.3 Retention and cleanup
 
@@ -682,7 +682,7 @@ This evidence does not close the production gates. Actual managed-Mac traffic is
 | Deprecated Jamf endpoints    | The selected resolver and catalog endpoints may be removed or changed before Jamf introduces replacements. | Accept and monitor the dependency risk; isolate both behind versioned adapters and migrate without changing client URLs when replacements appear.        |
 | Mac/Docker Desktop outage    | Mac, user session, Docker Desktop VM or storage failure makes the service unavailable.                    | Prove unattended recovery, monitor every layer, document the single-node risk and define a later HA option if the SLO requires it.                       |
 | Docker Desktop lifecycle     | Resource Saver, application updates, macOS updates or a missing user session can stop the service.        | Disable Resource Saver, manage settings and updates, use a dedicated operating model and test reboot/update recovery before pilot.                       |
-| Docker VM disk exhaustion    | Named-volume growth can exhaust Docker's VM disk image or the underlying APFS volume.                     | Set explicit disk limits, monitor Docker and macOS free space, preserve 20 percent headroom and exercise cleanup/recovery.                                |
+| Docker VM disk exhaustion    | Named-volume growth can exhaust Docker's VM disk image or the underlying APFS volume.                     | Set explicit disk limits, monitor Docker and macOS free space, preserve 30 percent package-store free space and exercise cleanup/recovery.                |
 | Signed-URL destination drift | JCDS/CDN hostnames may change and break a strict allowlist.                                               | Base the policy on Jamf-published domains, monitor rejections and use controlled configuration change rather than arbitrary egress.                      |
 | Unsafe or partial-file publication | An interrupted transfer or tampered filesystem object could be exposed as a valid package. | Serve regular files only; deny symbolic links; keep temporary files outside the served namespace; publish only a complete validated 200 response by atomic rename; audit permissions and unexpected objects. |
 | Range request bypass         | Clients that request only ranges may prevent full-object store population or cause duplicate traffic.     | Capture actual client behaviour; force a complete upstream retrieval on a miss and serve ranges from the completed local file.                           |
@@ -709,7 +709,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 - **Confirmed range:** The first release must support 500–2,000 managed Macs.
 - **Decision still required:** What package count, total working-set bytes, maximum package size and peak simultaneous-fill count must be supported?
-- **Recommended next step:** Measure recent inventory and demand, then load-test the active working set and concurrent temporary allowance with 20 percent headroom.
+- **Recommended next step:** Measure recent inventory and demand, then load-test the active working set and concurrent temporary allowance with the 30 percent free-space floor.
 - **Required by:** Detailed design and procurement
 
 #### OQ-04 — Availability objective (OPEN)
@@ -733,9 +733,8 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-07 — Store retention and size (IN REVIEW)
 
-- **Confirmed range:** The first host will provide 500 GB–1 TB of usable cache storage with at least 20 percent operational headroom.
-- **Decision still required:** What minimum retention period and cleanup selection policy should be configured?
-- **Recommended default:** Start with 180 days minimum inactivity before cleanup and validate it against inventory/reuse data. No freshness expiry is required for immutable names.
+- **Selected direction:** Plan approximately 500–600 GB usable cache on the 1 TB Mac. Trigger cleanup below 30 percent free space, delete completed packages not requested for `X` days in oldest-last-access order and stop at a recommended 35 percent recovery target. `X` remains open.
+- **Implementation requirement:** Maintain an explicit restricted local access index; filesystem `atime` is not authoritative. Reject new fills if cleanup cannot restore the free-space floor.
 - **Required by:** Detailed design
 
 #### OQ-08 — TLS ownership (RESOLVED FOR PILOT)
@@ -775,7 +774,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 #### OQ-14 — Production Mac hardware (RESOLVED)
 
 - **Decision:** Use a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage.
-- **Required follow-up:** Confirm the Apple silicon generation and prove that usable package capacity retains 20 percent operational headroom after macOS, Docker, images, logs and temporary downloads.
+- **Required follow-up:** Confirm the Apple silicon generation and prove that the selected Docker disk sizing supports the working set while retaining 30 percent package-store free space after images, logs and temporary downloads.
 
 #### OQ-15 — Docker Desktop licensing (RESOLVED)
 
@@ -784,15 +783,15 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-16 — Unattended startup and session model (IN REVIEW)
 
-- **Decision:** Use a dedicated macOS account. Fully automatic recovery is mandatory.
-- **Required follow-up:** Select the login/startup mechanism and demonstrate power-on-to-healthy recovery, including FileVault, Docker Desktop startup, Compose startup and failure alerting, without manual interaction.
+- **Decision:** Use a dedicated macOS account. FileVault/login behavior is confirmed as handled. Use a managed per-user LaunchAgent—not a normal root LaunchDaemon—to start Docker Desktop in the GUI session, wait for `docker info`, reconcile Compose and validate trusted HTTPS readiness.
+- **Required follow-up:** Implement the idempotent controller and demonstrate power-on-to-healthy recovery plus failure alerting without manual intervention. The live reboot test is explicitly deferred.
 
 #### OQ-17 — Production storage backing and macOS visibility (RESOLVED)
 
 - **Decision:** Use a Docker named volume at `/srv/jamf-store`, backed by Docker Desktop's disk image on managed APFS storage. Provide package inventory and management from macOS through Docker or purpose-built administrative commands.
 - **Clarification:** Docker/administrative access from macOS satisfies the visibility requirement; native Finder browsing is not required.
 - **Validated evidence:** Real fill, atomic publication, local byte identity, local range delivery and persistence across helper/NGINX restart passed on the target Mac.
-- **Required follow-up:** Qualify disk sizing, atomic rename, permissions, interruption, restart, reboot, update and recovery; retain 20 percent free-space headroom.
+- **Required follow-up:** Qualify disk sizing, atomic rename, permissions, interruption, restart, reboot, update and recovery; retain the 30 percent package-store free-space floor.
 
 #### OQ-18 — NGINX access enforcement and client-address visibility (RESOLVED)
 
@@ -801,14 +800,14 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-19 — Docker Desktop resource and update policy (OPEN)
 
-- **Decision required:** What CPU, RAM, swap, disk-image limit, Resource Saver, automatic-update and maintenance-window settings apply?
+- **Owner decision:** The service owner will configure CPU, RAM, swap, disk-image limit, Resource Saver, automatic-update and maintenance-window settings.
 - **Recommended default:** Disable Resource Saver, allocate fixed resources, prevent uncontrolled production updates and validate health after every macOS or Docker Desktop update.
 - **Required by:** Operations readiness
 
 #### OQ-20 — Cache recovery and backup (OPEN)
 
-- **Decision required:** Must cached or manually pre-populated packages be backed up, or may the package store be rebuilt entirely from JCDS?
-- **Recommended default:** Treat packages as rebuildable derived data; protect configuration, certificates and runbooks and test empty-cache recovery.
+- **Selected direction:** Treat packages as rebuildable derived data without package-volume backup. Protect configuration, certificates, approved deployment revision and runbooks outside the volume.
+- **Required follow-up:** Exercise deliberate empty-volume recovery: recreate the Compose volume and directory permissions, validate TLS, perform a real fill and repopulate on demand. Suspected corruption requires diagnostics and explicit approval before volume deletion.
 - **Required by:** Recovery design
 
 #### OQ-21 — Production helper identity (RESOLVED)
@@ -828,7 +827,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-05   | Publication integrity  | Require catalog length and SHA3-512 verification before atomic publication; do not treat MD5 as the security boundary.                                           |
 | D-07   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
 | D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
-| D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
+| D-09   | Initial scale          | Design for 500–2,000 managed Macs and an approximately 500–600 GB package working set while preserving at least 30 percent package-store free space.                 |
 | D-10   | Host profile           | Dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage, Docker Desktop and a dedicated service account; automatic recovery remains to be demonstrated. |
 | D-15   | macOS storage          | Use a Docker named volume in Docker Desktop's APFS-backed VM disk image; Docker/administrative access from macOS satisfies the visibility requirement. |
 | D-16   | Runtime identity       | Use validated UID `65532`, primary GID `0`, all capabilities dropped and a read-only root filesystem; no UID-0 exception is required. |

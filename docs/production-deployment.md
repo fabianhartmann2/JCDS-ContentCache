@@ -27,7 +27,7 @@ The existing profiles have different purposes:
 | Client network | Any network with a route to the Mac listener |
 | Client authentication | None; server-authenticated TLS only |
 | Workload | 500–2,000 managed Macs |
-| Cache capacity | 500 GB–1 TB usable with at least 20 percent headroom |
+| Cache capacity | Approximately 500–600 GB package working set with at least 30 percent package-store free space |
 | Container data paths | `/srv/jamf-store/packages` and `/srv/jamf-store/.temporary` |
 | Outbound network | Direct validated HTTPS; no proxy or TLS inspection |
 | Package integrity | Exact Jamf catalog length and SHA3-512 before atomic publication |
@@ -51,7 +51,7 @@ The approved host baseline is:
 
 - Dedicated wired Apple-silicon Mac mini.
 - 24 GB RAM and 1 TB APFS storage.
-- A Docker named volume in Docker Desktop's disk image, with at least 20 percent
+- A Docker named volume in Docker Desktop's disk image, with at least 30 percent
   operational headroom; actual usable cache capacity must account for macOS,
   images, logs and temporary in-progress downloads.
 - Static address or DHCP reservation and stable DNS/time synchronization.
@@ -232,6 +232,8 @@ The target-Mac validation completed OQ-21: the helper became healthy as UID
 container restart and recovered after an intentional helper stop. See
 [`macos-production-validation-2026-08-31.md`](macos-production-validation-2026-08-31.md)
 for the sanitized evidence. Unattended Mac reboot recovery remains deferred.
+The retained design for unattended startup, cache lifecycle and volume recovery
+is defined in [`production-readiness-plan.md`](production-readiness-plan.md).
 
 NGINX retains only `CHOWN`, `SETGID`, `SETUID` and `DAC_READ_SEARCH` after
 dropping all capabilities. `DAC_READ_SEARCH` lets its root master read a

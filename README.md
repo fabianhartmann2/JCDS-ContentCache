@@ -30,7 +30,7 @@ Milestone M1 demonstrates the complete local lifecycle without credentials:
 13. OAuth, Jamf API, redirect, and object failures are categorized without returning dependency bodies or logging complete request URLs.
 14. NGINX emits privacy-safe JSON behavior records for package requests without logging package names, paths, query strings, raw `Range` values, or raw user agents.
 
-The confirmed v1 contract accepts exactly one flat filename segment ending in lowercase `.pkg`. Nested paths and additional file types are deliberately outside the first release. Initial sizing targets 500–2,000 managed Macs and 500 GB–1 TB of usable cache storage with at least 20 percent operational headroom.
+The confirmed v1 contract accepts exactly one flat filename segment ending in lowercase `.pkg`. Nested paths and additional file types are deliberately outside the first release. Initial sizing targets 500–2,000 managed Macs, an approximately 500–600 GB package working set on the 1 TB Mac and at least 30 percent package-store free space.
 
 ## Local demonstration
 
@@ -92,7 +92,7 @@ The first production target is a dedicated Mac running Docker Desktop and servin
 
 The macOS production candidate is defined in `deploy/macos-production/` with a baked TLS-enabled NGINX configuration, named-volume storage, private helper networking and hardened containers. Package administration from macOS through Docker or purpose-built commands satisfies the visibility requirement. A live LAN test proved that Docker Desktop replaces the original source with `192.168.65.1`; source-CIDR filtering was therefore removed by explicit service-owner decision. Server-authenticated TLS protects transport but does not authorize clients. An organization-approved paid Docker Desktop entitlement is available. The package store remains derived and rebuildable from JCDS.
 
-See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current readiness plan, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
+See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current runbook, [Production readiness plan](docs/production-readiness-plan.md) for the retained path to approval, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
