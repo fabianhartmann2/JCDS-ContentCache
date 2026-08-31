@@ -777,11 +777,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Use a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage.
 - **Required follow-up:** Confirm the Apple silicon generation and prove that usable package capacity retains 20 percent operational headroom after macOS, Docker, images, logs and temporary downloads.
 
-#### OQ-15 — Docker Desktop licensing (BLOCKED)
+#### OQ-15 — Docker Desktop licensing (RESOLVED)
 
-- **Requested position:** Use Docker Desktop under the free tier.
-- **Constraint:** Docker's published terms limit free commercial use to small businesses with fewer than 250 employees **and** less than USD 10 million in annual revenue. Professional use in larger organizations requires a paid subscription. This enterprise production workload is therefore not eligible for the free tier.
-- **Decision required:** Obtain and record an organization-approved paid Docker entitlement, or select a production runtime architecture that does not depend on Docker Desktop. Name the owner for licensing, sign-in, updates and support.
+- **Decision:** Use Docker Desktop under the organization-approved paid entitlement now available for this production workload.
+- **Required follow-up:** Record the subscription owner, assigned account/organization, renewal process and support contact. Update ownership remains under OQ-19.
 
 #### OQ-16 — Unattended startup and session model (IN REVIEW)
 
@@ -813,8 +812,9 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-21 — Production helper identity (IN REVIEW)
 
-- **Decision:** Prefer a non-root helper. Permit UID 0 only after explicit approval, with `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and only the APFS package mount writable.
-- **Required follow-up:** Test the non-root identity against the selected bind mount; if it fails, document the minimum reason and obtain the explicit UID-0 exception before changing Compose.
+- **Decision:** Prefer a non-root helper. Permit UID 0 only after explicit approval, with `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and only the package volume writable.
+- **Implementation:** The macOS production profile uses UID `65532` with primary GID `0`; `store-init` creates group-writable named-volume directories without cross-UID `chown`. All helper capabilities remain dropped.
+- **Required follow-up:** Validate this identity and permission model on the target Mac; obtain the explicit UID-0 exception only if the non-root model fails there.
 
 ### 16.1 Confirmed decisions
 

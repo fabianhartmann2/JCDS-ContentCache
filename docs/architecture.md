@@ -115,7 +115,7 @@ server platform.
 | AD-06 | Package names are immutable and publication requires exact catalog length and SHA3-512 verification. |
 | AD-07 | The current `deploy/macos/` stack remains a localhost integration profile, not the production listener. |
 | AD-08 | The host is a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage. |
-| AD-09 | Use the standard Docker Desktop product only if an organization-approved paid entitlement is provided; Docker Desktop free-tier use is not eligible for this enterprise production workload. |
+| AD-09 | Use Docker Desktop under the organization-approved paid entitlement available for this production workload. |
 | AD-10 | Docker Desktop runs under a dedicated macOS account and fully automatic recovery must be demonstrated. |
 | AD-11 | Production package storage uses a Docker named volume in Docker Desktop's APFS-backed VM disk image. |
 | AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
@@ -125,13 +125,12 @@ server platform.
 | ID | Decision required | Recommended starting position |
 |---|---|---|
 | OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
-| OQ-15 | Docker Desktop production entitlement | Obtain an organization-approved paid Docker subscription or select a non-Docker-Desktop runtime architecture |
 | OQ-18 | Docker Desktop source-address visibility | No firewall selected; prove NGINX sees and rejects the real disallowed LAN source before relying on it |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
 | OQ-20 | Cache backup/rebuild and Docker Desktop disaster recovery | Treat package bytes as rebuildable; back up only configuration/certificates and test empty-cache recovery |
 | OQ-21 | Storage permission evidence for the selected identity | Prefer non-root; UID 0 is allowed only after explicit approval with all capabilities dropped and a read-only root filesystem |
 
-Implementation of `deploy/macos-production/` may begin for engineering and
-validation, but it must not be approved for production while OQ-15 remains
-blocked. OQ-16, OQ-18 and OQ-21 have selected directions but require acceptance
-evidence before the pilot. OQ-19 and OQ-20 must also be resolved before it.
+The first `deploy/macos-production/` implementation is available for
+engineering validation. OQ-16, OQ-18 and OQ-21 have selected directions but
+require target-Mac acceptance evidence before the pilot. OQ-19 and OQ-20 must
+also be resolved before it.

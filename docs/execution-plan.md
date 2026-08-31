@@ -162,7 +162,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Run a real-tenant smoke test with approved non-sensitive packages.
 - [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
 - [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with privacy-safe monitoring.
-- [ ] Implement a separate TLS-enabled `deploy/macos-production/` profile; do not expose the localhost test profile.
+- [x] Implement a separate TLS-enabled `deploy/macos-production/` candidate; do not expose the localhost test profile.
 - [ ] Prove unattended Docker Desktop and Compose recovery after Mac reboot and managed updates.
 - [ ] Validate the selected named-volume or APFS storage model at production capacity.
 - [ ] Measure throughput, time to first byte, CPU, memory, disk I/O and WAN usage.
@@ -216,13 +216,13 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
 | OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
-| OQ-15 | Docker Desktop licensing | Blocking | BLOCKED | Free tier requested but ineligible for enterprise production use | Obtain approved paid entitlement or change runtime architecture |
+| OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | Dedicated account; fully automatic recovery required | Startup mechanism plus cold-boot and update-recovery evidence |
 | OQ-17 | Production storage backing | Blocking | RESOLVED | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient | Qualify sizing, atomicity, permissions, restart, reboot and recovery |
 | OQ-18 | NGINX access enforcement/client IP | Blocking | IN REVIEW | No firewall; NGINX enforces `192.168.0.0/16` | Allowed/denied LAN test proving trustworthy source visibility |
 | OQ-19 | Docker Desktop resources and updates | High | OPEN | Disable Resource Saver and manage fixed resources/maintenance windows | Managed settings and update ownership |
 | OQ-20 | Cache backup/rebuild policy | Medium | OPEN | Rebuild package bytes from JCDS; protect configuration and certificates | Recovery owner and empty-cache recovery test |
-| OQ-21 | Production helper UID model | Blocking | IN REVIEW | Prefer non-root; UID 0 only with explicit approval and constrained controls | Bind-mount permission test; exception only if required |
+| OQ-21 | Production helper UID model | Blocking | IN REVIEW | UID 65532 with primary GID 0 and all capabilities dropped; UID 0 only by exception | Validate named-volume permissions on the target Mac |
 
 ## 6. Definition of ready for coding
 
@@ -302,8 +302,8 @@ The first coding milestone is a local, credential-free demonstration using mock 
 
 ## 10. Immediate next actions
 
-1. Implement the selected OQ-16 through OQ-18 and OQ-21 directions and collect their required recovery, bind-mount, LAN source-address and non-root evidence.
-2. Implement a separate `deploy/macos-production/` profile with TLS, LAN exposure, managed storage and Mac-specific operational controls.
+1. Validate the selected OQ-16 through OQ-18 and OQ-21 directions on the target Mac and collect their required recovery, named-volume, LAN source-address and non-root evidence.
+2. Review and qualify the implemented `deploy/macos-production/` profile with real TLS material and controlled LAN exposure.
 3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
 5. Resolve Docker resource/update policy, backup/rebuild, certificate-renewal, retention, SLO and monitoring ownership before the controlled production pilot.

@@ -75,5 +75,9 @@ jobs:
             --entrypoint nginx \
             jcds-content-cache-nginx:macos-real-test \
             -t
+      - name: Validate macOS production profile
+        run: |
+          bash -n tests/integration/macos_production_config_smoke.sh
+          tests/integration/macos_production_config_smoke.sh
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

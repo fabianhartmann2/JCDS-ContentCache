@@ -3,10 +3,10 @@
 ## Status and scope
 
 The production target is a dedicated Mac running Docker Desktop. This document
-defines the preparation and acceptance work for that target. It is not yet an
-executable deployment runbook because the blocking decisions in
-`docs/architecture.md` have not all been answered and
-`deploy/macos-production/` has not been implemented.
+defines the preparation and acceptance work for that target. The first
+`deploy/macos-production/` profile now exists for controlled engineering
+validation; it is not approved for a production pilot until the remaining
+evidence and operational gates in this document are closed.
 
 The existing profiles have different purposes:
 
@@ -15,7 +15,7 @@ The existing profiles have different purposes:
 | `deploy/compose/` | Credential-free mock development and CI | Not production |
 | `deploy/macos/` | Localhost-only real Jamf/JCDS integration test | Not production; never expose to the LAN |
 | `deploy/production/` | Earlier Ubuntu/Docker Engine candidate | Superseded; retained temporarily for reference |
-| `deploy/macos-production/` | Future TLS-enabled Mac production profile | Not yet implemented |
+| `deploy/macos-production/` | TLS-enabled Mac production candidate | Implemented for controlled validation; not yet pilot-approved |
 
 ## Confirmed service boundary
 
@@ -34,10 +34,10 @@ The existing profiles have different purposes:
 
 ## Production blockers
 
-Implementation of the production Compose profile requires answers for:
+Production-pilot approval still requires closure of:
 
 1. Mac model, Apple silicon generation, RAM, storage and network interface.
-2. Organization-approved paid Docker Desktop entitlement and operational owner; free-tier use is not eligible for this enterprise production workload.
+2. Paid Docker Desktop subscription ownership, renewal and support contacts; entitlement is available.
 3. Dedicated macOS account and unattended restart/session model.
 4. Named-volume capacity/recovery evidence and confirmation of the required macOS visibility semantics.
 5. NGINX source-address visibility and allowed/denied LAN evidence.
@@ -67,14 +67,10 @@ The service owner must keep the host within that support window:
 
 ## Docker Desktop governance
 
-The requested free-tier Docker Desktop use is not eligible for this enterprise
-production workload. Docker's published terms allow free commercial use only
-for small businesses with fewer than 250 employees and less than USD 10 million
-in annual revenue; professional use in larger organizations requires a paid
-subscription. An organization-approved paid entitlement and named operational
-owner are production blockers. If that entitlement cannot be provided, the
-runtime architecture must be changed before production. Settings management
-and updates also need named owners:
+An organization-approved paid Docker Desktop entitlement is available for this
+production workload. Before pilot approval, record the subscription owner,
+assigned Docker account or organization, renewal process and support contact.
+Settings management and updates also need named owners:
 
 - <https://docs.docker.com/subscription/desktop-license/>
 - <https://docs.docker.com/enterprise/security/enforce-sign-in/>
@@ -223,6 +219,67 @@ revalidated.
 - capacity thresholds and temporary-file cleanup;
 - architecture-compatible images for the selected Apple silicon host.
 
+The initial candidate implements these controls. Its helper remains non-root at
+UID `65532` with primary GID `0`, allowing writes to group-owned named-volume
+directories without the cross-UID `chown` that Docker Desktop rejected during
+integration testing. The helper retains `cap_drop: ALL`, `no-new-privileges`
+and a read-only root filesystem. This model must be validated on the target Mac
+before OQ-21 is closed.
+
+NGINX retains only `CHOWN`, `SETGID`, `SETUID` and `DAC_READ_SEARCH` after
+dropping all capabilities. `DAC_READ_SEARCH` lets its root master read a
+mode-`0600` Mac-owned TLS private key from the read-only certificate-directory
+mount without granting discretionary write bypass; workers still switch to the
+unprivileged `nginx` identity.
+
+## Controlled candidate startup
+
+Do not reuse the localhost real-backend environment file. On the target Mac,
+create a private runtime directory outside the checkout, copy the two example
+files, replace every `REPLACE` value, and restrict the helper environment:
+
+```bash
+runtime_root="${HOME}/JCDS-ContentCache-runtime"
+mkdir -p "${runtime_root}/tls"
+
+cp deploy/macos-production/cache-helper.env.example \
+  "${runtime_root}/cache-helper.production.env"
+cp deploy/macos-production/deployment.env.example \
+  "${runtime_root}/deployment.production.env"
+
+chmod 0600 "${runtime_root}/cache-helper.production.env"
+```
+
+Place `fullchain.pem` and `privkey.pem` in the configured TLS directory and
+keep the private key mode `0600`. After editing the two private environment
+files, validate and start the candidate:
+
+```bash
+docker compose \
+  --env-file "${runtime_root}/deployment.production.env" \
+  --file deploy/macos-production/compose.yaml \
+  config --quiet
+
+docker compose \
+  --env-file "${runtime_root}/deployment.production.env" \
+  --file deploy/macos-production/compose.yaml \
+  up --build --detach
+
+docker compose \
+  --env-file "${runtime_root}/deployment.production.env" \
+  --file deploy/macos-production/compose.yaml \
+  ps --all
+```
+
+Expected state: `store-init` exited `0`; `cache-helper` and `nginx` are healthy.
+Do not use `down --volumes` during normal restart or upgrade operations.
+
+The first LAN request is an OQ-18 acceptance test, not merely a connectivity
+check. The privacy-safe NGINX record must show the real client source address.
+If it shows a Docker bridge/gateway address, stop: the configured NGINX CIDR
+policy cannot distinguish allowed and denied clients and the no-firewall design
+is not acceptable for production.
+
 ## Monitoring and operations
 
 Production monitoring must cover:
@@ -242,7 +299,7 @@ name, URI, query, raw range, raw user agent, credentials or signed URL.
 ## Pilot acceptance sequence
 
 1. Close the remaining evidence and policy gates in OQ-16 through OQ-21 and approve the architecture.
-2. Implement and review `deploy/macos-production/`.
+2. Review and qualify the implemented `deploy/macos-production/` candidate.
 3. Build and test the selected ARM64 images in CI and on the target Mac.
 4. Configure DNS, certificate, NGINX access policy, storage and protected secret delivery.
 5. Prove cold-boot recovery and controlled update/restart behavior.
