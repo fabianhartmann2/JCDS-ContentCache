@@ -161,8 +161,11 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
-- [ ] Connect logs, metrics and alerts to the selected monitoring platform.
-- [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
+- [ ] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
+- [ ] Add exact receiver-host validation, redirect rejection, bounded retry/spooling and the selected HMAC/bearer/mTLS authentication.
+- [ ] Connect webhook snapshots and sanitized logs to the selected monitoring platform.
+- [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
+- [ ] Retain an external HTTPS probe because an in-container snapshot cannot prove managed-client reachability or macOS/Docker Desktop health.
 - [x] Define packages as rebuildable data and pass an isolated destructive empty-volume recovery exercise on the target Mac.
 - [ ] Run a real-tenant smoke test with approved non-sensitive packages.
 - [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
@@ -203,7 +206,9 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 ## 5. Open-question register
 
-Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be resolved before the affected implementation or production gate.
+Status values are `OPEN`, `DESIGN APPROVED; IMPLEMENTATION PENDING`, `IN REVIEW`
+or `RESOLVED`. Blocking questions must be resolved before the affected
+implementation or production gate.
 
 | ID | Decision | Priority | Current status | Recommended starting position | Evidence needed |
 |---|---|---:|---|---|---|
@@ -219,7 +224,7 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
-| OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
+| OQ-10 | Monitoring and alerting platform | Medium | DESIGN APPROVED; IMPLEMENTATION PENDING | Existing cache-maintainer sends configurable periodic HTTPS snapshots; webhook failure is isolated from serving and cleanup | Receiver/owner, HMAC vs bearer/mTLS, allowlist, retention, alerts and implementation evidence |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |
@@ -315,5 +320,5 @@ The first coding milestone is a local, credential-free demonstration using mock 
 1. Record the service-owner Docker Desktop resource and update settings.
 2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 3. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
-4. Select monitoring/alert ownership and certificate-renewal automation.
+4. Select the webhook receiver/authentication/alert owner, implement `docs/webhook-monitoring.md`, and establish certificate-renewal automation.
 5. Implement the LaunchAgent controller and complete the explicitly deferred OQ-16 unattended reboot/session recovery test before final production approval.

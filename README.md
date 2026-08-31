@@ -115,6 +115,13 @@ docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
 
 See [Client request monitoring](docs/client-request-monitoring.md) for the schema, privacy boundary, request classifications, example analyses, proxy caveats, and production guidance.
 
+A planned extension will let the existing cache-maintainer send a periodic,
+privacy-bounded service snapshot to a configurable HTTPS webhook. The reporter
+is disabled by default and is deliberately decoupled from delivery, cleanup and
+readiness. See [Webhook monitoring concept](docs/webhook-monitoring.md) for the
+proposed payload, configuration, security controls and acceptance gates. It is
+not implemented in the current production image.
+
 ## Sanitized live-contract capture
 
 After a dedicated read-only Jamf API client is available, run the Docker wrapper from an interactive terminal:
@@ -168,6 +175,7 @@ docs/                   Architecture, requirements, execution plan and contract 
 - [Project execution plan](docs/execution-plan.md)
 - [External-contract evidence template](docs/external-contracts.md)
 - [Client request monitoring](docs/client-request-monitoring.md)
+- [Webhook monitoring concept](docs/webhook-monitoring.md)
 - [Real-backend test on macOS](docs/macos-real-backend-test.md)
 - [Production deployment readiness](docs/production-deployment.md)
 

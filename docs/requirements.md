@@ -594,11 +594,18 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | Upstream policy | allowed signed-URL host patterns, redirect limit, DNS/IP restrictions, TLS trust                                                  |
 | Package store   | container root/temporary paths, Docker volume or APFS backing path, Docker disk-image location/limit, cleanup, lock timeout, minimum free space, ownership and permissions |
 | HTTP            | connect/read/send timeouts, maximum package size, range policy, client-abort behaviour                                            |
-| Observability   | log format/level, metrics listener, correlation header and monitoring destination                                                 |
+| Observability   | log format/level, correlation header, webhook enablement/URL/interval/timeout, instance identity, inventory mode, receiver allowlist and authentication reference |
 
 ### 13.3 Monitoring and alerting
 
 The baseline NGINX behavior-log schema and privacy boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata, but it must not reintroduce the excluded URI, package identity, raw headers, credentials or signed URLs.
+
+The approved reporting direction is an optional periodic HTTPS webhook sender
+inside the existing cache-maintainer. Its versioned contract, configurable
+interval, stable identity, inventory modes, transport controls, failure
+isolation and acceptance tests are defined in
+`docs/webhook-monitoring.md`. The feature is disabled by default. Webhook
+failure must not affect delivery, cleanup, readiness or container health.
 
 - Alert when the service or helper is not ready for longer than the agreed grace period.
 
@@ -748,10 +755,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Store the secret as an environment assignment in a root-owned mode-`0600` host file outside Git and let Docker inject it only into the helper container.
 - **Required follow-up:** Exercise rotation through file replacement and helper recreation; restrict Docker administration because privileged operators can inspect container environment values.
 
-#### OQ-10 — Monitoring platform (OPEN)
+#### OQ-10 — Monitoring platform (DESIGN APPROVED; IMPLEMENTATION PENDING)
 
-- **Decision required:** Which log, metric and alert platform will own the service telemetry?
-- **Recommended default:** Integrate with the existing enterprise platform and expose Prometheus-compatible metrics if that matches current standards.
+- **Decision:** Extend the cache-maintainer with a dynamically configured periodic HTTPS webhook reporter using the privacy-bounded contract in `docs/webhook-monitoring.md`.
+- **Required follow-up:** Select the receiver and owner, finalize HMAC/bearer/mTLS authentication, implement and pass the documented acceptance suite, then configure alert ownership and retention.
 - **Required by:** Operations readiness
 
 #### OQ-11 — Path model (RESOLVED)

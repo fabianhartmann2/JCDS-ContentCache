@@ -43,7 +43,8 @@ representation backing that container path is a separate production decision.
 | NGINX | TLS termination, client method/path controls, local static delivery, miss routing and privacy-safe request telemetry |
 | Go helper | OAuth, Jamf catalog/resolver access, destination validation, streaming, SHA3-512/length verification and atomic publication |
 | Package-store volume | Immutable completed packages and hidden same-filesystem temporary downloads |
-| Operations integration | Health monitoring, logs, alerts, certificate expiry, capacity, controlled updates and recovery |
+| Cache maintainer | Restricted access index, capacity cleanup and the planned decoupled webhook snapshot reporter |
+| Operations integration | Webhook receiver, external reachability, alerts, certificate expiry, host capacity, controlled updates and recovery |
 
 ## 4. Security boundaries
 
@@ -121,6 +122,12 @@ server platform.
 | AD-10 | Docker Desktop runs under a dedicated macOS account and fully automatic recovery must be demonstrated. |
 | AD-11 | Production package storage uses a Docker named volume in Docker Desktop's APFS-backed VM disk image. |
 | AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
+| AD-13 | Extend the existing cache-maintainer with an optional HTTPS webhook reporter; receiver failure must never affect package delivery, cleanup or readiness. |
+
+The reporter design, payload and privacy boundary are specified in
+`docs/webhook-monitoring.md`. It is not yet implemented. It intentionally does
+not receive the Docker socket; macOS, Docker Desktop and real client
+reachability require host-side or external observation.
 
 ## 8. Blocking production decisions
 

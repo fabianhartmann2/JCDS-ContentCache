@@ -321,6 +321,16 @@ Production monitoring must cover:
 NGINX behavior records must retain the existing privacy boundary: no package
 name, URI, query, raw range, raw user agent, credentials or signed URL.
 
+The approved future monitoring integration extends the existing
+cache-maintainer with an optional periodic HTTPS webhook reporter. It will send
+stable instance identity, readiness, uptime, storage/cache state, aggregate
+traffic and cleanup outcomes using the privacy-bounded contract in
+`webhook-monitoring.md`. The webhook is disabled by default and is not
+implemented in the current image. Receiver failure must not affect delivery,
+cleanup, readiness or container health. Operators must retain an external HTTPS
+probe because the container cannot prove macOS/Docker Desktop health or actual
+client-network reachability.
+
 ## Pilot acceptance sequence
 
 1. Close the remaining evidence and policy gates in OQ-16, OQ-17 and OQ-19 and approve the architecture.
