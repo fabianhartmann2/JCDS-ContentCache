@@ -99,6 +99,17 @@ assert_request_id_header "${temporary_directory}/local.headers"
 cmp "${fixture}" "${temporary_directory}/local.pkg"
 [[ "$(mock_metrics)" == "${metrics_after_miss}" ]]
 
+# Jamf clients use /Packages with an uppercase P. It must resolve to the same
+# canonical object without a redirect or a second upstream request.
+curl --fail --silent --show-error \
+  --dump-header "${temporary_directory}/jamf-case.headers" \
+  --output "${temporary_directory}/jamf-case.pkg" \
+  http://127.0.0.1:8443/Packages/ExampleFile.pkg
+assert_source_header "${temporary_directory}/jamf-case.headers" LOCAL
+assert_request_id_header "${temporary_directory}/jamf-case.headers"
+cmp "${fixture}" "${temporary_directory}/jamf-case.pkg"
+[[ "$(mock_metrics)" == "${metrics_after_miss}" ]]
+
 curl --fail --silent --show-error \
   --head \
   --dump-header "${temporary_directory}/head.headers" \
@@ -183,6 +194,7 @@ for forbidden in (
     "ExampleFile.pkg",
     "Missing.pkg",
     "/packages/",
+    "/Packages/",
     "bytes=",
     "curl/",
 ):

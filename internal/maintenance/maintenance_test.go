@@ -17,6 +17,7 @@ func TestParseAccessEvent(t *testing.T) {
 	}{
 		{"complete", `<190>prefix {"status":200,"uri":"/packages/Example.pkg"}`, "Example.pkg", true},
 		{"range", `{"status":206,"uri":"/packages/Example%20File.pkg"}`, "Example File.pkg", true},
+		{"jamf capitalized path", `{"status":200,"uri":"/Packages/Example.pkg"}`, "Example.pkg", true},
 		{"miss", `{"status":404,"uri":"/packages/Example.pkg"}`, "", false},
 		{"traversal", `{"status":200,"uri":"/packages/../secret.pkg"}`, "", false},
 		{"health", `{"status":200,"uri":"/health/ready"}`, "", false},

@@ -41,6 +41,11 @@ if grep -q 'allow 192\.168\.0\.0/16' "${repository_root}/deploy/macos-production
   exit 1
 fi
 
+if ! grep -q 'rewrite \^/Packages/' "${repository_root}/deploy/macos-production/nginx.conf"; then
+  echo "The macOS production profile must normalize Jamf /Packages requests" >&2
+  exit 1
+fi
+
 docker compose --file "${compose_file}" build nginx cache-helper cache-maintainer
 docker compose --file "${compose_file}" run --rm --no-deps store-init
 

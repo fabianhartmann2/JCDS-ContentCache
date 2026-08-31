@@ -461,6 +461,30 @@ func TestHeadMissDoesNotStartUpstreamFill(t *testing.T) {
 	}
 }
 
+func TestJamfCapitalizedPackagePathUsesSameStoredObject(t *testing.T) {
+	api, finalPath, resolver, metadata := newTestServer(t, "http://127.0.0.1/unused", nil)
+	if err := os.WriteFile(finalPath, []byte("cached package"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/Packages/ExampleFile.pkg", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("capitalized package status = %d, want 200", response.Code)
+	}
+	if response.Body.String() != "cached package" {
+		t.Fatalf("capitalized package body = %q", response.Body.String())
+	}
+	if got := response.Header().Get("X-Package-Source"); got != "LOCAL" {
+		t.Fatalf("capitalized package source = %q, want LOCAL", got)
+	}
+	if resolver.calls.Load() != 0 || metadata.calls.Load() != 0 {
+		t.Fatal("capitalized local hit unexpectedly contacted upstream")
+	}
+}
+
 func TestInvalidPackagePathsAreRejectedBeforeUpstreamCalls(t *testing.T) {
 	tests := []string{
 		"/packages/../Secret.pkg",

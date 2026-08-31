@@ -24,7 +24,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Delivery target | Production service |
 | Package identity | Filenames are immutable; one filename always identifies the same bytes |
 | Deployment | NGINX and a Go helper run as containers through Docker Desktop on one dedicated Mac |
-| Client namespace | `https://<server>:8443/packages/<filename>.pkg` |
+| Client namespace | Jamf-compatible `/Packages/<filename>.pkg`; lowercase `/packages/` compatibility alias |
 | V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
 | Initial client population | 500–2,000 managed Macs |
 | Initial package working set | Approximately 500–600 GB, retaining at least 30% package-store free space |

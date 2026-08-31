@@ -142,10 +142,16 @@ func ParseAccessEvent(message []byte) (string, bool) {
 		return "", false
 	}
 	parsed, err := url.ParseRequestURI(event.URI)
-	if err != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !strings.HasPrefix(parsed.Path, "/packages/") {
+	if err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", false
 	}
-	filename, err := url.PathUnescape(strings.TrimPrefix(parsed.EscapedPath(), "/packages/"))
+	prefix := "/packages/"
+	if strings.HasPrefix(parsed.Path, "/Packages/") {
+		prefix = "/Packages/"
+	} else if !strings.HasPrefix(parsed.Path, prefix) {
+		return "", false
+	}
+	filename, err := url.PathUnescape(strings.TrimPrefix(parsed.EscapedPath(), prefix))
 	if err != nil || store.ValidateFilename(filename) != nil {
 		return "", false
 	}

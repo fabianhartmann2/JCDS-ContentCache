@@ -3,10 +3,15 @@
 `JCDS-ContentCache` is a filesystem-backed pull-through package store for Jamf Cloud Distribution Service (JCDS). Managed clients use a stable internal URL such as:
 
 ```text
-https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
+https://jcds-cache.appfruit.ch:8443/Packages/ExampleFile.pkg
 ```
 
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
+
+Jamf clients use `/Packages/<filename>.pkg` with an uppercase `P`. The endpoint
+also accepts the historical lowercase `/packages/<filename>.pkg` spelling.
+NGINX normalizes both internally to the same canonical file; no redirect or
+duplicate cache entry is created.
 
 > [!IMPORTANT]
 > The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not pilot-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, named-volume recovery qualification, certificate renewal, cleanup acceptance and monitoring ownership remain production gates.

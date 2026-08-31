@@ -21,7 +21,10 @@ import (
 	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
 )
 
-const packagePathPrefix = "/packages/"
+const (
+	packagePathPrefix       = "/packages/"
+	jamfPackagePathPrefix   = "/Packages/"
+)
 
 type objectSource interface {
 	Open(context.Context, string) (*http.Response, error)
@@ -70,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health/live", s.handleLiveness)
 	mux.HandleFunc("/health/ready", s.handleReadiness)
 	mux.HandleFunc(packagePathPrefix, s.handlePackage)
+	mux.HandleFunc(jamfPackagePathPrefix, s.handlePackage)
 	return mux
 }
 
@@ -306,10 +310,13 @@ func packageFilename(r *http.Request) (string, error) {
 		return "", errors.New("query parameters are not accepted")
 	}
 	escapedPath := r.URL.EscapedPath()
-	if !strings.HasPrefix(escapedPath, packagePathPrefix) {
+	prefix := packagePathPrefix
+	if strings.HasPrefix(escapedPath, jamfPackagePathPrefix) {
+		prefix = jamfPackagePathPrefix
+	} else if !strings.HasPrefix(escapedPath, packagePathPrefix) {
 		return "", errors.New("path is outside the package namespace")
 	}
-	escapedFilename := strings.TrimPrefix(escapedPath, packagePathPrefix)
+	escapedFilename := strings.TrimPrefix(escapedPath, prefix)
 	if escapedFilename == "" || strings.Contains(escapedFilename, "/") {
 		return "", errors.New("package path must contain exactly one filename segment")
 	}
