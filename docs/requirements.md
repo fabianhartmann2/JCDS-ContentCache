@@ -132,7 +132,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Permit source CIDR `192.168.0.0/16`; no additional client authentication is required for v1.                                                                               | Resolved            |
-| Storage boundary       | Keep `/srv/jamf-store` as the container path; select and validate either a Docker named volume or dedicated APFS bind mount for production.                                 | Open                |
+| Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Finder-visible APFS host-directory bind mount; production qualification remains mandatory.                          | In review           |
 | Secret delivery        | Pass the Jamf client secret through a root-owned mode-`0600` host environment file outside Git.                                                                             | Resolved            |
 | DNS and certificate    | Use manual DNS records and manual DNS validation for initial certificate issuance; expiry monitoring is mandatory and unattended renewal remains a production gate.          | Pilot decision      |
 | Outbound network       | Connect directly over validated HTTPS without an outbound proxy or TLS inspection.                                                                                          | Resolved            |
@@ -703,7 +703,7 @@ The following items are intentionally explicit. Recommended defaults permit deta
 #### OQ-02 — Client access control (RESOLVED)
 
 - **Decision:** Use server-authenticated TLS and restrict v1 access to source CIDR `192.168.0.0/16`; no additional client authentication is required.
-- **Required follow-up:** Enforce the same CIDR at NGINX and the approved Docker-aware host/perimeter firewall, then validate from one allowed and one denied network.
+- **Required follow-up:** Validate from one allowed and one denied LAN source that NGINX sees trustworthy source addresses and enforces the CIDR; if Docker Desktop masks them, add a source-aware host/perimeter control.
 
 #### OQ-03 — Workload and capacity (IN REVIEW)
 
@@ -772,35 +772,30 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Parse the observed complete array. If a future response uses an envelope that reports more records than it contains, fail explicitly instead of returning a false not-found result.
 - **Required follow-up:** Retain contract tests and monitor the deprecated endpoint for schema changes.
 
-#### OQ-14 — Production Mac hardware (OPEN)
+#### OQ-14 — Production Mac hardware (RESOLVED)
 
-- **Decision required:** Which dedicated Mac model, Apple silicon generation, RAM, internal storage, external storage and network interface will host the service?
-- **Recommended default:** A dedicated wired Mac mini with at least 16 GB RAM, with 24–32 GB preferred, and storage sized above the 500 GB–1 TB usable-cache requirement plus 20 percent headroom.
-- **Required by:** macOS production profile implementation and procurement
+- **Decision:** Use a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage.
+- **Required follow-up:** Confirm the Apple silicon generation and prove that usable package capacity retains 20 percent operational headroom after macOS, Docker, images, logs and temporary downloads.
 
-#### OQ-15 — Docker Desktop licensing and ownership (OPEN)
+#### OQ-15 — Docker Desktop licensing (RESOLVED)
 
-- **Decision required:** Is an enterprise Docker Desktop subscription available, and which team owns licensing, settings enforcement and updates?
-- **Recommended default:** Docker Business managed through the enterprise Mac-management platform.
-- **Required by:** Production approval
+- **Decision:** The user confirms Docker Desktop free-tier eligibility applies.
+- **Required follow-up:** Record the eligibility review and reassess it if organizational size, revenue, ownership or usage changes. Update ownership remains under OQ-19.
 
-#### OQ-16 — Unattended startup and session model (OPEN)
+#### OQ-16 — Unattended startup and session model (IN REVIEW)
 
-- **Decision required:** May a dedicated macOS service account remain logged in, and how must the service recover after reboot without manual interaction?
-- **Recommended default:** Use a dedicated service account and prove Docker Desktop plus Compose recovery after reboot; if a persistent session is prohibited, reassess Docker Desktop as the production runtime.
-- **Required by:** Architecture approval
+- **Decision:** Use a dedicated macOS account. Fully automatic recovery is mandatory.
+- **Required follow-up:** Select the login/startup mechanism and demonstrate power-on-to-healthy recovery, including FileVault, Docker Desktop startup, Compose startup and failure alerting, without manual interaction.
 
-#### OQ-17 — Production storage backing (OPEN)
+#### OQ-17 — Production storage backing (IN REVIEW)
 
-- **Decision required:** Will `/srv/jamf-store` use a Docker named volume or a dedicated APFS bind mount, and where will Docker's VM disk image reside?
-- **Recommended default:** Start with a named volume because it passed the real-backend Mac test; place and size Docker's disk image on managed APFS storage and treat cache bytes as rebuildable.
-- **Required by:** Capacity design and production Compose implementation
+- **Decision:** Use a dedicated APFS host directory bind-mounted at `/srv/jamf-store`, with completed packages directly visible in Finder.
+- **Required follow-up:** Pass the bind-mount qualification suite for large-file throughput, atomic rename, permissions, interruption, restart, reboot, update, host-side access and absence of `EIO`; retain 20 percent free-space headroom.
 
-#### OQ-18 — macOS firewall and client-address visibility (OPEN)
+#### OQ-18 — NGINX access enforcement and client-address visibility (IN REVIEW)
 
-- **Decision required:** Which macOS or perimeter control will enforce `192.168.0.0/16`, and does Docker Desktop preserve the real client source address at NGINX?
-- **Recommended default:** Enforce the CIDR before Docker Desktop using macOS `pf` or an approved perimeter firewall; treat NGINX CIDR rules as defense in depth until LAN tests prove source-address visibility.
-- **Required by:** Security design
+- **Decision:** Do not deploy a host firewall; use NGINX to reject clients outside `192.168.0.0/16`.
+- **Required follow-up:** Prove from allowed and disallowed LAN sources that Docker Desktop preserves a trustworthy client address at NGINX. If it does not, this decision is infeasible and a source-aware host/perimeter control becomes mandatory.
 
 #### OQ-19 — Docker Desktop resource and update policy (OPEN)
 
@@ -814,11 +809,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Recommended default:** Treat packages as rebuildable derived data; protect configuration, certificates and runbooks and test empty-cache recovery.
 - **Required by:** Recovery design
 
-#### OQ-21 — Production helper identity (OPEN)
+#### OQ-21 — Production helper identity (IN REVIEW)
 
-- **Decision required:** Can the production helper remain non-root with the chosen Docker Desktop storage model, or is the tested UID-0/all-capabilities-dropped compatibility model acceptable?
-- **Recommended default:** Prefer non-root. Permit UID 0 only through a documented exception retaining `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and a narrowly writable package volume.
-- **Required by:** Security approval and production Compose implementation
+- **Decision:** Prefer a non-root helper. Permit UID 0 only after explicit approval, with `cap_drop: ALL`, `no-new-privileges`, a read-only root filesystem and only the APFS package mount writable.
+- **Required follow-up:** Test the non-root identity against the selected bind mount; if it fails, document the minimum reason and obtain the explicit UID-0 exception before changing Compose.
 
 ### 16.1 Confirmed decisions
 
@@ -832,7 +826,9 @@ The following items are intentionally explicit. Recommended defaults permit deta
 | D-07   | Storage representation | Completed packages use a human-readable filesystem path matching the canonical client URL and original filename; opaque hashed proxy-cache storage is not used. |
 | D-08   | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and other file types are excluded.                                                  |
 | D-09   | Initial scale          | Design for 500–2,000 managed Macs and 500 GB–1 TB usable cache storage while preserving at least 20 percent operational headroom.                                    |
-| D-10   | Host profile           | Dedicated Mac running a supported macOS release and Docker Desktop; hardware, storage backing and startup/session model remain open under OQ-14 through OQ-17. |
+| D-10   | Host profile           | Dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage, Docker Desktop and a dedicated service account; automatic recovery remains to be demonstrated. |
+| D-15   | macOS storage          | Use a Finder-visible APFS bind mount for the package store, subject to mandatory Docker Desktop reliability qualification. |
+| D-16   | Runtime identity       | Prefer non-root; UID 0 requires explicit approval and the constrained security model defined by OQ-21. |
 | D-11   | Service access         | Publish `jcds-cache.appfruit.ch:8443` and permit `192.168.0.0/16`; no additional v1 client authentication.                                                       |
 | D-12   | Certificate            | Use manual DNS validation for the pilot with mandatory expiry alerting; unattended renewal remains a production gate.                                           |
 | D-13   | Secret delivery        | Inject the Jamf client secret into the helper from a root-owned mode-`0600` host environment file outside Git.                                                   |
@@ -859,7 +855,7 @@ Resolve the remaining questions in this order because each answer constrains the
 
 3.  Confirm legitimate JCDS/CDN destinations and validate the resolved OQ-02 network controls (OQ-06).
 
-4.  Set the SLO and cleanup policy, then answer the Mac hardware, startup, storage, firewall and runtime-identity decisions (OQ-04, OQ-07 and OQ-14 through OQ-21).
+4.  Set the SLO and cleanup policy, then close the startup, storage qualification, source-address, Docker policy, recovery and runtime-identity evidence (OQ-04, OQ-07 and OQ-16 through OQ-21).
 
 5.  Assign certificate-renewal and monitoring ownership, exercise secret rotation, and close the operational follow-ups for OQ-08 to OQ-10.
 

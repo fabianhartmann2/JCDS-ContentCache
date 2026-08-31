@@ -31,7 +31,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | Host baseline | Dedicated Mac on a supported macOS release; exact hardware and resources remain open |
 | Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
 | Client access | Server-authenticated TLS and source CIDR `192.168.0.0/16`; no additional v1 client authentication |
-| Package-store mount | `/srv/jamf-store` inside containers; named volume versus APFS backing remains open |
+| Package-store mount | Finder-visible APFS host directory bind-mounted at `/srv/jamf-store`; production qualification pending |
 | DNS and certificate | Manual DNS records and an initial certificate obtained through manual DNS validation; unattended renewal remains a production gate |
 | Secret delivery | Root-owned host environment file, mode `0600`, passed to the helper by Docker Compose |
 | Outbound network | Direct HTTPS; no proxy or TLS inspection |
@@ -210,19 +210,19 @@ Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be 
 | OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
 | OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
 | OQ-07 | Store capacity and retention | High | IN REVIEW | Provision 500 GB–1 TB usable cache storage and retain 20% headroom; retention/eviction policy remains open | Inventory growth, reuse interval, and operational cleanup policy |
-| OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS plus source CIDR `192.168.0.0/16`; no additional v1 authentication | Validate allowed and denied paths at the host/perimeter firewall and NGINX |
+| OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS plus source CIDR `192.168.0.0/16`; no additional v1 authentication | Validate allowed and denied LAN paths at NGINX; OQ-18 determines feasibility under Docker Desktop |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
 | OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
-| OQ-14 | Production Mac hardware | Blocking | OPEN | Dedicated wired Mac mini with at least 16 GB RAM; 24–32 GB preferred | Model, Apple silicon generation, RAM, storage and network interface |
-| OQ-15 | Docker Desktop licensing and ownership | Blocking | OPEN | Docker Business managed by the enterprise | Subscription entitlement and owning team |
-| OQ-16 | Unattended startup/session model | Blocking | OPEN | Dedicated service account and proven reboot recovery | Login policy, startup mechanism and reboot evidence |
-| OQ-17 | Production storage backing | Blocking | OPEN | Named volume with Docker VM disk on sufficiently large managed APFS storage | Capacity, disk-image location/limit, throughput and recovery evidence |
-| OQ-18 | macOS firewall and client IP visibility | Blocking | OPEN | Enforce CIDR before Docker Desktop and validate NGINX source addresses | Approved firewall mechanism plus allowed/denied LAN tests |
+| OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
+| OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | User-confirmed free-tier eligibility | Record review; reassess when organizational eligibility changes |
+| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | Dedicated account; fully automatic recovery required | Startup mechanism plus cold-boot and update-recovery evidence |
+| OQ-17 | Production storage backing | Blocking | IN REVIEW | Finder-visible APFS bind mount at `/srv/jamf-store` | Large-file, atomicity, permission, restart, reboot, update and `EIO` qualification |
+| OQ-18 | NGINX access enforcement/client IP | Blocking | IN REVIEW | No firewall; NGINX enforces `192.168.0.0/16` | Allowed/denied LAN test proving trustworthy source visibility |
 | OQ-19 | Docker Desktop resources and updates | High | OPEN | Disable Resource Saver and manage fixed resources/maintenance windows | Managed settings and update ownership |
 | OQ-20 | Cache backup/rebuild policy | Medium | OPEN | Rebuild package bytes from JCDS; protect configuration and certificates | Recovery owner and empty-cache recovery test |
-| OQ-21 | Production helper UID model | Blocking | OPEN | Prefer non-root; explicitly approve constrained UID 0 only if required | Storage permission test and security approval |
+| OQ-21 | Production helper UID model | Blocking | IN REVIEW | Prefer non-root; UID 0 only with explicit approval and constrained controls | Bind-mount permission test; exception only if required |
 
 ## 6. Definition of ready for coding
 
@@ -302,7 +302,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 
 ## 10. Immediate next actions
 
-1. Resolve OQ-14 through OQ-18 and OQ-21: Mac hardware, Docker Desktop licensing, unattended startup, storage, firewall/source-address behavior and production helper identity.
+1. Implement the selected OQ-16 through OQ-18 and OQ-21 directions and collect their required recovery, bind-mount, LAN source-address and non-root evidence.
 2. Implement a separate `deploy/macos-production/` profile with TLS, LAN exposure, managed storage and Mac-specific operational controls.
 3. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 4. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.

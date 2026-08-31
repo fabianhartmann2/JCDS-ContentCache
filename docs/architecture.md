@@ -2,7 +2,7 @@
 
 **Status:** Draft for production-target review  
 **Target:** Dedicated Mac running Docker Desktop  
-**Last updated:** 30 August 2026
+**Last updated:** 31 August 2026
 
 ## 1. Architecture decision
 
@@ -22,8 +22,7 @@ startup, capacity controls, monitoring and recovery procedures.
 ```mermaid
 flowchart TD
     C["Managed Macs"] -->|"HTTPS :8443"| H["macOS host boundary"]
-    H --> F["macOS pf / network control"]
-    F --> N["NGINX container"]
+    H --> N["NGINX container"]
     N -->|"Local hit"| V["Package-store volume"]
     N -->|"Store miss"| G["Go helper container"]
     G --> V
@@ -39,7 +38,7 @@ representation backing that container path is a separate production decision.
 
 | Component | Responsibility |
 |---|---|
-| Dedicated Mac | Physical availability, macOS lifecycle, network, time, power, host firewall and Docker Desktop startup |
+| Dedicated Mac | Physical availability, macOS lifecycle, network, time, power and Docker Desktop startup |
 | Docker Desktop | Linux VM, Docker Engine, Compose, container networking, image storage and persistent-volume implementation |
 | NGINX | TLS termination, client method/path controls, local static delivery, miss routing and privacy-safe request telemetry |
 | Go helper | OAuth, Jamf catalog/resolver access, destination validation, streaming, SHA3-512/length verification and atomic publication |
@@ -50,9 +49,10 @@ representation backing that container path is a separate production decision.
 
 - Only NGINX publishes TCP 8443. The helper remains private to the Docker
   network.
-- The macOS host or perimeter firewall is the primary source-CIDR enforcement
-  point. NGINX CIDR controls are defense in depth only until Docker Desktop's
-  source-address behavior is validated from the production LAN.
+- NGINX is intended to enforce the source CIDR because no host firewall is
+  planned. This is acceptable only if a production-LAN test proves that Docker
+  Desktop preserves the real client address. Until that evidence exists,
+  OQ-18 remains a blocking security decision.
 - NGINX terminates server-authenticated TLS for
   `jcds-cache.appfruit.ch`. Certificate and private-key material is mounted
   read-only from a protected macOS directory or delivered through an approved
@@ -70,25 +70,20 @@ representation backing that container path is a separate production decision.
 
 ## 5. Storage architecture
 
-The recommended starting position is a Docker-managed named volume because the
-real-backend Mac test exposed Docker Desktop failures for a single-file host
-bind mount and cross-UID ownership changes. A named volume preserves original
-package filenames inside the container filesystem, but its bytes reside inside
-Docker Desktop's Linux VM disk image rather than as directly browsable Finder
-files.
+Production will use a dedicated APFS host directory bind-mounted at
+`/srv/jamf-store`, so completed packages remain directly visible in Finder
+under their original filenames. The store must provide 500 GB–1 TB usable
+capacity, retain at least 20 percent headroom, and keep temporary and final
+paths on the same APFS filesystem for atomic rename.
 
-Production approval requires a decision between:
-
-1. **Docker named volume:** preferred compatibility; requires explicit Docker
-   disk-image location, size, free-space monitoring, volume inspection and
-   reset/recovery procedures.
-2. **Dedicated APFS bind mount:** host-visible files; requires sustained
-   throughput, atomic-rename, ownership, reboot and Docker Desktop update tests
-   before acceptance.
-
-Whichever option is selected must provide 500 GB–1 TB usable capacity, retain
-at least 20 percent headroom, keep temporary and final paths on the same
-filesystem and support atomic rename.
+This choice is conditional on a qualification test. Earlier Docker Desktop
+testing exposed bind-mount I/O and ownership failures, while the named-volume
+profile succeeded. Production acceptance must therefore prove sustained
+large-file streaming, same-filesystem atomic publication, stable permissions,
+restart and update survival, host-side inspection/pre-population, and absence
+of `EIO` failures. If it fails, the architecture decision must be reopened;
+silently falling back to Docker's VM disk image would violate the Finder-visible
+requirement.
 
 ## 6. Availability and lifecycle
 
@@ -120,20 +115,23 @@ server platform.
 | AD-05 | `jcds-cache.appfruit.ch:8443` and client CIDR `192.168.0.0/16` remain the intended service boundary. |
 | AD-06 | Package names are immutable and publication requires exact catalog length and SHA3-512 verification. |
 | AD-07 | The current `deploy/macos/` stack remains a localhost integration profile, not the production listener. |
+| AD-08 | The host is a dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage. |
+| AD-09 | Docker Desktop free-tier applicability is user-confirmed; entitlement must be rechecked if organizational eligibility changes. |
+| AD-10 | Docker Desktop runs under a dedicated macOS account and fully automatic recovery must be demonstrated. |
+| AD-11 | Production package storage is a Finder-visible APFS bind mount, subject to the mandatory qualification suite. |
+| AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
 
 ## 8. Blocking production decisions
 
 | ID | Decision required | Recommended starting position |
 |---|---|---|
-| OQ-14 | Dedicated Mac model, Apple silicon generation, RAM, internal storage and external-storage use | Dedicated wired Mac mini with at least 16 GB RAM; 24–32 GB preferred |
-| OQ-15 | Docker Desktop commercial subscription and enterprise ownership | Docker Business owned and managed by the enterprise |
-| OQ-16 | Unattended startup and macOS session model | Dedicated service account; prove restart recovery without manual intervention before pilot |
-| OQ-17 | Named volume versus APFS bind mount and Docker disk-image placement | Named volume with Docker disk image on sufficiently large managed APFS storage |
-| OQ-18 | Host firewall mechanism and source-address visibility | Enforce CIDR at macOS/perimeter firewall; test actual client IP visibility before relying on NGINX allow/deny |
+| OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
+| OQ-17 | APFS bind-mount qualification evidence | Finder-visible APFS directory selected; pass the mandatory reliability and performance suite |
+| OQ-18 | Docker Desktop source-address visibility | No firewall selected; prove NGINX sees and rejects the real disallowed LAN source before relying on it |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
 | OQ-20 | Cache backup/rebuild and Docker Desktop disaster recovery | Treat package bytes as rebuildable; back up only configuration/certificates and test empty-cache recovery |
-| OQ-21 | Production helper UID model under Docker Desktop named-volume ownership behavior | Prefer non-root; if Docker Desktop prevents it, document and approve UID 0 with all capabilities dropped and a read-only root filesystem |
+| OQ-21 | Storage permission evidence for the selected identity | Prefer non-root; UID 0 is allowed only after explicit approval with all capabilities dropped and a read-only root filesystem |
 
-Implementation of `deploy/macos-production/` may begin after OQ-14 through
-OQ-18 and OQ-21 are answered. OQ-19 and OQ-20 must be resolved before the
-production pilot begins.
+Implementation of `deploy/macos-production/` may begin. OQ-16 through OQ-18
+and OQ-21 now have selected directions but require acceptance evidence before
+the production pilot. OQ-19 and OQ-20 must also be resolved before that pilot.

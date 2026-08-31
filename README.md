@@ -9,7 +9,7 @@ https://jcds-cache.appfruit.ch:8443/packages/ExampleFile.pkg
 NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
 
 > [!IMPORTANT]
-> The production target is a dedicated Mac running Docker Desktop, but the repository does not yet contain an approved LAN-facing macOS production profile. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Host sizing, Docker Desktop licensing, unattended startup, production storage, firewall enforcement, certificate renewal, retention and monitoring ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running Docker Desktop, but the repository does not yet contain an approved LAN-facing macOS production profile. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Unattended startup, APFS bind-mount qualification, LAN source-IP enforcement, certificate renewal, retention and monitoring ownership remain production gates.
 
 ## Current milestone
 
@@ -90,7 +90,7 @@ Follow [Real-backend test on macOS](docs/macos-real-backend-test.md). Never comm
 
 The first production target is a dedicated Mac running Docker Desktop and serving `jcds-cache.appfruit.ch:8443` to `192.168.0.0/16`. NGINX and the Go helper continue to run inside Docker Desktop's Linux VM. The existing `deploy/macos/` profile is deliberately bound to localhost and is not the production listener.
 
-The macOS production design requires a separate TLS-enabled Compose profile, macOS/perimeter firewall enforcement, managed Docker Desktop startup and updates, explicit VM resource sizing, production storage and recovery procedures. The recommended storage starting point is a Docker named volume, subject to a decision about Docker's disk-image location, capacity and recovery. The package store remains derived and rebuildable from JCDS.
+The macOS production design requires a separate TLS-enabled Compose profile, managed Docker Desktop startup and updates, explicit VM resource sizing, production storage and recovery procedures. Production selects a Finder-visible APFS bind mount, subject to a mandatory Docker Desktop reliability qualification. NGINX is intended to enforce the client CIDR, but this remains blocked until a LAN test proves that Docker Desktop preserves trustworthy client source addresses. The package store remains derived and rebuildable from JCDS.
 
 See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, and [Production deployment](docs/production-deployment.md) for the current readiness plan. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 

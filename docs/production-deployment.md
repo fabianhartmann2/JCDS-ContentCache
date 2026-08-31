@@ -39,8 +39,8 @@ Implementation of the production Compose profile requires answers for:
 1. Mac model, Apple silicon generation, RAM, storage and network interface.
 2. Docker Desktop subscription entitlement and operational owner.
 3. Dedicated macOS account and unattended restart/session model.
-4. Docker named volume versus APFS bind mount and Docker VM disk placement.
-5. macOS/perimeter firewall implementation and source-address visibility.
+4. APFS bind-mount qualification and capacity evidence.
+5. NGINX source-address visibility and allowed/denied LAN evidence.
 6. Production helper UID model for the selected storage implementation.
 
 The pilot additionally requires Docker resource/update policy, cache recovery,
@@ -48,12 +48,13 @@ certificate-renewal ownership, monitoring ownership, retention and SLO.
 
 ## Recommended host baseline
 
-Until OQ-14 is resolved, use the following planning baseline:
+The approved host baseline is:
 
 - Dedicated wired Apple-silicon Mac mini.
-- At least 16 GB RAM; 24–32 GB preferred.
-- Internal or managed external APFS capacity sufficient for Docker Desktop,
-  500 GB–1 TB usable package data and 20 percent free-space headroom.
+- 24 GB RAM and 1 TB APFS storage.
+- A Finder-visible APFS package directory with at least 20 percent operational
+  headroom; actual usable cache capacity must account for macOS, images, logs
+  and temporary in-progress downloads.
 - Static address or DHCP reservation and stable DNS/time synchronization.
 - Supported macOS release managed through MDM.
 - Sleep and automatic power-off disabled for the always-on service.
@@ -66,9 +67,11 @@ The service owner must keep the host within that support window:
 
 ## Docker Desktop governance
 
-Professional use of Docker Desktop in a large organization requires an
-appropriate paid subscription. Licensing, organization sign-in, settings
-management and updates must have named owners before production approval:
+The user has confirmed that Docker Desktop's free tier applies to this
+deployment. That eligibility must be recorded by the service owner and
+rechecked if organizational size, revenue, ownership or usage changes. Docker
+Desktop currently requires a paid subscription for professional use in larger
+organizations. Settings management and updates still need named owners:
 
 - <https://docs.docker.com/subscription/desktop-license/>
 - <https://docs.docker.com/enterprise/security/enforce-sign-in/>
@@ -111,29 +114,15 @@ approved macOS session and management model:
 
 ## Package-store selection
 
-### Option A — Docker named volume
+### Selected option — dedicated APFS bind mount
 
-Recommended starting position because it passed the real-backend Mac test and
-avoids the single-file bind-mount and cross-UID ownership failures observed on
-Docker Desktop.
+Production requires package files to be directly visible in Finder, so a
+dedicated host APFS directory will be bind-mounted at `/srv/jamf-store`.
+Docker-managed named volumes are not acceptable for this requirement because
+their files are managed inside Docker Desktop rather than exposed as normal
+host files.
 
-Requirements:
-
-- Docker VM disk image placed on sufficiently large managed APFS storage;
-- disk limit larger than maximum cache use plus operational headroom;
-- monitoring of Docker volume usage, Docker disk-image use and host APFS free
-  space;
-- administrative inventory/removal commands that operate through a container;
-- tested recovery after Docker Desktop reset, reinstall or VM-disk failure.
-
-Docker Desktop stores Mac container data in one large disk-image file. Its
-location and limit are managed through Docker Desktop settings:
-
-- <https://docs.docker.com/desktop/troubleshoot-and-support/faqs/macfaqs/>
-
-### Option B — dedicated APFS bind mount
-
-Provides host-visible package filenames but is not approved until testing proves:
+The bind mount is selected but is not approved for pilot use until testing proves:
 
 - sustained large-file throughput;
 - same-filesystem atomic rename;
@@ -141,6 +130,12 @@ Provides host-visible package filenames but is not approved until testing proves
 - no `EIO` or file-sharing failures;
 - behaviour across Docker Desktop and macOS updates;
 - safe host-side pre-population and cleanup.
+
+The qualification must use representative multi-gigabyte packages, concurrent
+readers, an interrupted fill, container recreation, Docker Desktop restart,
+macOS reboot and a controlled Docker Desktop update. It must also verify that
+`.temporary` and `packages` reside on the same APFS filesystem and that only an
+atomic rename makes a completed package visible.
 
 The selected implementation must retain `/srv/jamf-store` as the internal
 container root so application logic and tests remain portable.
@@ -187,18 +182,14 @@ acceptable for the controlled pilot only when:
 The production listener binds TCP 8443 to the approved host interface. The
 localhost test profile must remain bound to `127.0.0.1`.
 
-Because Docker Desktop forwards traffic through its Linux VM, the production
-design must not assume that NGINX receives the original client source address.
-Before pilot:
-
-1. Select an approved macOS `pf` or perimeter-firewall implementation.
-2. Enforce inbound TCP 8443 only from `192.168.0.0/16` before traffic reaches
-   Docker Desktop.
-3. Test one allowed and one denied client.
-4. Record the address observed by NGINX and determine whether it is suitable for
-   client correlation.
-5. Keep NGINX CIDR controls as defense in depth where source addresses are
-   preserved.
+No host firewall is planned. NGINX is therefore the intended enforcement point
+for `192.168.0.0/16`. Because Docker Desktop forwards traffic through its Linux
+VM, this design is blocked until a LAN test proves NGINX receives a trustworthy
+original source address. Test one allowed client and one client outside the
+approved range, record NGINX's observed address, and prove the latter receives
+a denial. If both appear as a Docker gateway or another shared address, NGINX
+cannot implement the requirement and a source-aware host/perimeter control is
+mandatory.
 
 Only TCP 8443 may be published. The helper and plaintext health endpoint remain
 inside the Docker network/container boundary. Outbound HTTPS is limited to the
@@ -241,7 +232,7 @@ name, URI, query, raw range, raw user agent, credentials or signed URL.
 
 ## Pilot acceptance sequence
 
-1. Resolve OQ-14 through OQ-21 and approve the architecture.
+1. Close the remaining evidence and policy gates in OQ-16 through OQ-21 and approve the architecture.
 2. Implement and review `deploy/macos-production/`.
 3. Build and test the selected ARM64 images in CI and on the target Mac.
 4. Configure DNS, certificate, firewall, storage and protected secret delivery.
