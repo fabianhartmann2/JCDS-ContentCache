@@ -4,7 +4,7 @@
 
 **Target:** Dedicated Mac mini running licensed Docker Desktop
 
-**Last updated:** 31 August 2026
+**Last updated:** 1 September 2026
 
 This document is the retained plan for moving the validated macOS production
 candidate to production approval. Completed technical evidence is recorded in
@@ -19,7 +19,7 @@ repository and is confirmed as resolved by the service owner. The operational
 acceptance test must still demonstrate that the resulting login sequence makes
 the dedicated user's GUI session available after the approved reboot scenario.
 
-### Startup mechanism
+### Implemented startup mechanism
 
 Use a managed per-user `LaunchAgent`, not a normal system `LaunchDaemon`, to
 start and supervise this Docker Desktop workload. Docker Desktop is a
@@ -27,24 +27,33 @@ GUI-session application; a root LaunchDaemon does not by itself provide the
 required user bootstrap namespace and is therefore the wrong primary lifecycle
 mechanism.
 
-The planned idempotent controller performs this sequence:
+The implemented idempotent controller performs this sequence:
 
 1. Run in the dedicated service account's GUI session at login.
 2. Start `/Applications/Docker.app` with `open -gja` if Docker Desktop is not
    already running.
 3. Poll `docker info` with a bounded timeout until the Docker engine is ready.
-4. Run `docker compose up --detach` with the reviewed
-   `deploy/macos-production/compose.yaml` and protected deployment environment.
-5. Wait until `cache-helper` and `nginx` report healthy.
+4. Run `docker compose up --detach --no-build` with the reviewed
+   `deploy/macos-production/compose.yaml`, the optional monitoring override and
+   protected deployment environment.
+5. Wait until `cache-helper`, `cache-maintainer` and `nginx` report healthy.
 6. Verify the trusted HTTPS readiness endpoint.
 7. Write a credential-free result to a protected operational log and return a
    non-zero status on failure for monitoring or MDM collection.
-8. Repeat periodically or when invoked by management so recovery does not
-   depend only on the initial login event.
+8. Repeat every five minutes or when invoked by management so recovery does
+   not depend only on the initial login event.
 
 Compose retains `restart: unless-stopped`; this restarts containers after the
 Docker engine returns. The LaunchAgent closes the remaining gap by starting
 Docker Desktop and reconciling the Compose application itself.
+
+The implementation consists of the managed plist under
+`deploy/macos-production/`, the credential-free controller and management
+scripts under `scripts/`, and the automated controller test under
+`tests/integration/`. The controller uses bounded waits, never disables TLS
+validation, never builds during recovery and pins the reviewed Compose files by
+SHA-256. Installation and cold-boot acceptance are documented in
+[`macos-unattended-recovery.md`](macos-unattended-recovery.md).
 
 ### How reachability without manual intervention is achieved
 
@@ -57,10 +66,10 @@ flowchart TD
     C --> H["HTTPS readiness verified"]
 ```
 
-No operator action is required when every transition succeeds. A cold-boot
-test must capture timestamps for each transition and prove the service is
-reachable from a second Mac. The test is explicitly deferred; OQ-16 remains in
-review until it passes.
+No operator action is required when every transition succeeds. The controller
+records a credential-free timestamp for each transition. A cold-boot test must
+still prove the service is reachable from a second Mac. OQ-16 remains in review
+until that target-Mac test passes.
 
 ## 2. Docker Desktop operating parameters
 
@@ -186,7 +195,7 @@ remained ready. OQ-20 is resolved for the pilot.
 
 | ID | Decision or evidence still required |
 |---|---|
-| OQ-16 | Implement LaunchAgent controller and pass cold-boot-to-HTTPS recovery |
+| OQ-16 | LaunchAgent controller implemented; pass cold-boot-to-HTTPS recovery on the target Mac |
 | OQ-17 | Validate final disk sizing, macOS reboot and Docker update behavior |
 | OQ-19 | Record service-owner Docker resource and update settings |
 | OQ-10 | Select monitoring platform, alert routing and retention |

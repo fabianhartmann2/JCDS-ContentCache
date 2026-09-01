@@ -235,7 +235,7 @@ implementation or production gate.
 | OQ-10 | Monitoring and alerting platform | Medium | WEBHOOK VALIDATED; METRICS API ACCEPTANCE PENDING | One collector feeds independent unauthenticated API and HTTPS webhook consumers; target-Mac webhook delivery is validated | Validate disabled/API-only/combined modes; assign receiver/alert owner, retention, escalation and signed-URL rotation |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
-| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |
+| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Controller and simulated recovery test implemented; install and pass the target-Mac cold-boot test |
 | OQ-17 | Production storage backing | Blocking | RESOLVED FOR PILOT | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient; atomicity, permissions, restart and destructive recovery passed | Qualify final sizing, macOS reboot and Docker Desktop update behavior |
 | OQ-18 | NGINX access enforcement/client IP | Blocking | RESOLVED | Docker Desktop masks clients as `192.168.65.1`; source filtering removed and unrestricted route-level access accepted | Live LAN evidence captured on 2026-08-31 |
 | OQ-19 | Docker Desktop resources and updates | High | IN REVIEW | Service owner configures settings; Resource Saver remains disabled and updates controlled | Record final values and update owner |
@@ -334,4 +334,4 @@ The first coding milestone is a local, credential-free demonstration using mock 
 2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
 3. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
 4. Select the webhook receiver/authentication/alert owner, implement `docs/webhook-monitoring.md`, and establish certificate-renewal automation.
-5. Implement the LaunchAgent controller and complete the explicitly deferred OQ-16 unattended reboot/session recovery test before final production approval.
+5. Install the implemented LaunchAgent controller and complete the OQ-16 unattended reboot/session recovery test before final production approval.

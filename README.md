@@ -14,7 +14,7 @@ NGINX normalizes both internally to the same canonical file; no redirect or
 duplicate cache entry is created.
 
 > [!IMPORTANT]
-> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup, destructive empty-volume recovery and Power Automate webhook delivery are validated for the pilot. Unattended startup, final capacity qualification, certificate renewal and monitoring operations ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup, destructive empty-volume recovery and Power Automate webhook delivery are validated for the pilot. The per-user unattended-start controller is implemented; its target-Mac cold-boot test, final capacity qualification, certificate renewal and monitoring operations ownership remain production gates.
 
 ## Current milestone
 
@@ -104,7 +104,7 @@ bytes and report `X-Package-Source: INFLIGHT`. Range followers wait for verified
 atomic publication and then receive normal `206 LOCAL` delivery. Only a
 length- and SHA3-512-verified file becomes visible in the final cache namespace.
 
-See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current runbook, [Production readiness plan](docs/production-readiness-plan.md) for the retained path to approval, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
+See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current runbook, [Unattended macOS reboot recovery](docs/macos-unattended-recovery.md) for LaunchAgent installation and cold-boot acceptance, [Production readiness plan](docs/production-readiness-plan.md) for the retained path to approval, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
 
 ## Client request monitoring
 
@@ -174,8 +174,10 @@ internal/store/         Temporary files, publication and single-flight locks
 deploy/compose/         Local development stack
 deploy/contract-capture/ Hardened one-shot live validation image
 deploy/macos/           Localhost-only real-backend Docker Desktop test
+deploy/macos-production/ TLS production profile and per-user recovery agent
 deploy/nginx/           Development and production NGINX templates
 deploy/production/      Superseded Linux candidate retained temporarily for reference
+scripts/                Contract, certificate and macOS recovery operations
 docs/                   Architecture, requirements, execution plan and contract evidence
 ```
 
@@ -189,6 +191,7 @@ docs/                   Architecture, requirements, execution plan and contract 
 - [Webhook monitoring concept](docs/webhook-monitoring.md)
 - [Real-backend test on macOS](docs/macos-real-backend-test.md)
 - [Production deployment readiness](docs/production-deployment.md)
+- [Unattended macOS reboot recovery](docs/macos-unattended-recovery.md)
 
 ## Security notes
 

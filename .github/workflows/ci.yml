@@ -78,6 +78,10 @@ jobs:
       - name: Validate macOS production profile
         run: |
           bash -n tests/integration/macos_production_config_smoke.sh
+          bash -n scripts/macos-startup-controller.sh
+          bash -n scripts/manage-macos-launchagent.sh
+          bash -n tests/integration/macos_startup_controller_test.sh
+          tests/integration/macos_startup_controller_test.sh
           tests/integration/macos_production_config_smoke.sh
       - name: Docker Compose smoke test
         run: tests/integration/compose_smoke.sh

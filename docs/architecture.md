@@ -143,13 +143,14 @@ retention and operational ownership remain open.
 
 | ID | Decision required | Recommended starting position |
 |---|---|---|
-| OQ-16 | Exact login/startup mechanism and recovery evidence | Dedicated account selected; prove power-on-to-healthy recovery without manual interaction before pilot |
+| OQ-16 | Startup recovery evidence | Managed per-user LaunchAgent implemented; prove power-on-to-healthy recovery without manual interaction before pilot |
 | OQ-19 | Docker Desktop CPU, RAM, disk limit, Resource Saver and update policy | Disable Resource Saver; assign fixed resources and controlled update windows through managed settings |
 
 The first `deploy/macos-production/` implementation is available for
 engineering validation. OQ-18 is resolved by removing source filtering after
 Docker Desktop source-address masking was demonstrated. OQ-20 is resolved for
 the pilot by the isolated destructive empty-volume recovery exercise, and
-OQ-21 is resolved by the successful non-root target-Mac validation. OQ-16,
-final OQ-17 sizing/update evidence and OQ-19 retain gates before final
-production approval.
+OQ-21 is resolved by the successful non-root target-Mac validation. The OQ-16
+mechanism is implemented, but its cold-boot evidence remains open. Final OQ-17
+sizing/update evidence and OQ-19 also retain gates before final production
+approval.

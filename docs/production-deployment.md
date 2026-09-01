@@ -36,7 +36,8 @@ The existing profiles have different purposes:
 
 Production-pilot approval still requires closure of:
 
-1. Demonstrate unattended restart/session recovery from Mac power-on to healthy HTTPS.
+1. Install the implemented LaunchAgent and demonstrate unattended
+   restart/session recovery from Mac power-on to healthy HTTPS.
 2. Record final Docker Desktop CPU, memory, disk-image, Resource Saver and update policy.
 3. Qualify final named-volume capacity, representative large-file performance,
    macOS reboot and Docker Desktop update behavior.
@@ -96,7 +97,7 @@ Resource Saver is enabled by default and is unsuitable for an always-on cache:
 
 Docker Desktop is a macOS application backed by a Linux VM, not a conventional
 host Docker Engine daemon. Container restart policies take effect only after
-Docker Desktop is running. The approved operating model must document:
+Docker Desktop is running. The approved operating model documents:
 
 - the dedicated macOS account that owns/runs Docker Desktop;
 - whether that account may remain logged in;
@@ -106,10 +107,14 @@ Docker Desktop is running. The approved operating model must document:
 - how FileVault unlock and unattended reboot constraints are handled;
 - how macOS and Docker Desktop updates are staged and validated.
 
-The production pilot must include cold-boot evidence from power-on to a healthy
-HTTPS endpoint without undocumented manual actions. Docker Desktop provides a
-CLI for start/stop/restart operations, but its use must be integrated into the
-approved macOS session and management model:
+The implemented per-user LaunchAgent starts Docker Desktop in the dedicated
+account's GUI session, reconciles the reviewed Compose application and verifies
+trusted HTTPS. See
+[`macos-unattended-recovery.md`](macos-unattended-recovery.md) for installation,
+operations, removal and the cold-boot acceptance sequence. The production pilot
+must still capture evidence from power-on to a healthy HTTPS endpoint without
+undocumented manual actions. Docker Desktop also provides a CLI for controlled
+start/stop/restart operations:
 
 - <https://docs.docker.com/desktop/features/desktop-cli/>
 
@@ -297,6 +302,21 @@ docker compose \
 Expected state: `store-init` exited `0`; `cache-helper`, `cache-maintainer` and
 `nginx` are healthy.
 Do not use `down --volumes` during normal restart or upgrade operations.
+
+After this controlled startup and the trusted LAN smoke test pass, install the
+per-user recovery mechanism from the dedicated account's GUI session. The
+current deployment uses the monitoring override:
+
+```bash
+./scripts/manage-macos-launchagent.sh install \
+  --health-url https://jcds-cache.appfruit.ch:8443/health/ready \
+  --with-monitoring
+```
+
+The controller uses `up --detach --no-build`; approved images must therefore
+exist before installation or upgrade. Full instructions and the required
+second-Mac reboot test are in
+[`macos-unattended-recovery.md`](macos-unattended-recovery.md).
 
 The two copied files remain the only private environment files used by this
 profile. `cache-helper.production.env` contains Jamf/JCDS helper configuration.

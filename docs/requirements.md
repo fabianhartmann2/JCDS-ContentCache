@@ -131,7 +131,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
 | Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
 | Cache storage          | Target an approximately 500–600 GB package working set on the 1 TB Mac and retain at least 30 percent package-store free space.                                             | In review           |
-| Host baseline          | Use a dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage and Docker Desktop; unattended startup remains open.                                                       | Partially resolved  |
+| Host baseline          | Use a dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage and Docker Desktop; the unattended-start mechanism is implemented and cold-boot acceptance remains open.     | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Use server-authenticated TLS without source-CIDR filtering or client authentication; any route-reachable client may request packages.                                      | Resolved            |
 | Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Docker named volume in Docker Desktop's APFS-backed disk image; Docker/administrative access from macOS satisfies the visibility requirement. | Resolved            |
@@ -822,7 +822,14 @@ The following items are intentionally explicit. Recommended defaults permit deta
 #### OQ-16 — Unattended startup and session model (IN REVIEW)
 
 - **Decision:** Use a dedicated macOS account. FileVault/login behavior is confirmed as handled. Use a managed per-user LaunchAgent—not a normal root LaunchDaemon—to start Docker Desktop in the GUI session, wait for `docker info`, reconcile Compose and validate trusted HTTPS readiness.
-- **Required follow-up:** Implement the idempotent controller and demonstrate power-on-to-healthy recovery plus failure alerting without manual intervention. The live reboot test is explicitly deferred.
+- **Implemented evidence:** A per-user LaunchAgent, idempotent controller,
+  installer/removal workflow, protected phase log and simulated recovery test
+  are present in the repository. The controller starts Docker Desktop, applies
+  only the pinned reviewed Compose configuration without building, waits for
+  container health and validates trusted HTTPS.
+- **Required follow-up:** Install the controller on the target Mac and
+  demonstrate power-on-to-healthy recovery plus external failure alerting
+  without manual intervention.
 
 #### OQ-17 — Production storage backing and macOS visibility (RESOLVED)
 
