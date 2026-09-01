@@ -1,6 +1,6 @@
-# Webhook monitoring
+# Metrics API and webhook monitoring
 
-**Status:** Phase 1 implemented; target-Mac delivery to Power Automate validated
+**Status:** Webhook delivery validated; optional unauthenticated metrics API implemented, target-Mac acceptance pending
 
 **Target component:** `cache-maintainer`
 
@@ -8,9 +8,10 @@
 
 ## 1. Purpose and boundary
 
-The production cache extends the existing `cache-maintainer` with a
-periodic reporter. The reporter sends a current, privacy-bounded service
-snapshot to a dynamically configured HTTPS webhook. It does not participate in
+The production cache extends the existing `cache-maintainer` with a periodic
+snapshot collector. The collector stores the latest privacy-bounded service
+snapshot for an optional `GET /health/metrics` API and can independently send
+the exact same JSON bytes to a dynamically configured HTTPS webhook. It does not participate in
 package delivery, cache publication, cleanup decisions or gateway readiness.
 
 Webhook failure must never make NGINX, the helper or the maintainer unhealthy,
@@ -30,6 +31,7 @@ flowchart LR
     H["Component health"] --> M
     V["Package and maintenance volumes"] --> M
     M -->|"Periodic HTTPS snapshot"| W["Approved webhook receiver"]
+    M -->|"Latest snapshot"| A["Optional metrics API"]
 ```
 
 NGINX's internal event schema carries safe aggregate fields such
@@ -40,15 +42,17 @@ credential, token or signed URL.
 
 ## 3. Configuration
 
-The names below define the implemented contract. Reporting is activated only
-when `deploy/macos-production/compose.monitoring.yaml` is included.
+The names below define the implemented contract. Collection is configured only
+when `deploy/macos-production/compose.monitoring.yaml` is included. API and
+webhook delivery are independent and disabled by default.
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `METRICS_WEBHOOK_ENABLED` | `false` | Explicit opt-in switch |
+| `METRICS_API_ENABLED` | `false` | Expose the latest snapshot through `/health/metrics` |
+| `METRICS_WEBHOOK_ENABLED` | `false` | Enable periodic webhook delivery independently of the API |
 | `METRICS_WEBHOOK_URL` | empty | Exact HTTPS receiver URL |
-| `METRICS_WEBHOOK_INTERVAL` | `60s` | Snapshot interval |
-| `METRICS_WEBHOOK_TIMEOUT` | `10s` | Per-attempt request timeout |
+| `METRICS_SNAPSHOT_INTERVAL` | `60s` | Shared snapshot interval; minimum 10 seconds |
+| `METRICS_SNAPSHOT_TIMEOUT` | `10s` | Health-check and webhook request timeout |
 | `METRICS_WEBHOOK_ALLOWED_HOSTS` | empty | Comma-separated exact receiver hostnames |
 | `METRICS_WEBHOOK_ALLOW_PRIVATE_IPS` | `false` | Explicitly allow an approved receiver in private address space |
 | `METRICS_WEBHOOK_AUTH_MODE` | `none` | Implemented values: `none` or `hmac` |
@@ -69,9 +73,12 @@ when `deploy/macos-production/compose.monitoring.yaml` is included.
 If no UUID is configured, the maintainer generates one once and stores it with
 mode `0600` in the maintenance volume, for example at
 `/srv/jamf-maintenance/instance-id`. Changing containers must not change the
-identity. A missing URL, allowlist or required authentication secret while the
-feature is enabled is a startup configuration error for the reporter, but must
-not disable cache delivery or cleanup.
+identity. A missing URL, allowlist or required authentication secret while
+webhook delivery is enabled disables only the webhook. API-only collection
+continues. Invalid shared identity, inventory, TLS or timing configuration
+disables both optional consumers but must not disable cache delivery or
+cleanup. The legacy `METRICS_WEBHOOK_INTERVAL` and
+`METRICS_WEBHOOK_TIMEOUT` names remain accepted as fallbacks.
 
 The HMAC secret must be a regular file containing at least 32 bytes. It may be
 owner-only or group-readable only when the file group exactly matches the
@@ -83,7 +90,7 @@ The maintainer receives only the public certificate or full-chain PEM through
 a dedicated read-only mount. It must never receive or mount the TLS private
 key. Warning and critical durations must be positive, and the warning duration
 must be greater than or equal to the critical duration.
-When webhook reporting is enabled, the public certificate path is required.
+When either metrics consumer is enabled, the public certificate path is required.
 Failure to read or parse it after startup must produce an `unknown` TLS status
 in subsequent snapshots rather than stopping reporting, cleanup or delivery.
 
@@ -162,13 +169,15 @@ unknown fields as forward-compatible additions.
     "removed_bytes_total": 987654321
   },
   "reporter": {
+    "webhook_enabled": true,
     "previous_delivery_succeeded": true,
     "consecutive_failures": 0
   }
 }
 ```
 
-Traffic counters cover the interval since the previous snapshot. Cleanup
+Traffic counters cover the interval since the previous snapshot. Reading the
+API never resets or changes them. Cleanup
 totals are monotonic since maintainer start. `event_id` supports receiver deduplication; `sequence`
 helps detect missed or reordered snapshots. Cleanup result values are
 `not_required`, `target_reached`, `target_not_reached`, and `failed`.
@@ -199,6 +208,14 @@ per-client activity. The reporter must never log its request body or
 authentication material.
 
 ## 6. Transport, authentication and failure behavior
+
+`/health/metrics` is intentionally unauthenticated when enabled. It is served
+only through the existing TLS listener and returns `404` while disabled. The
+accepted production network boundary has no source filter or client
+authentication, so every client able to route to TCP 8443 can read the
+snapshot. With `full` inventory this includes package filenames, sizes and
+last-access timestamps. This is an explicit service-owner disclosure decision;
+the API remains disabled by default.
 
 - Accept HTTPS only, reject redirects and require an exact hostname allowlist.
 - Resolve and dial the validated destination directly, without ambient proxy
@@ -318,7 +335,28 @@ Power Automate trigger URL may use `none` because the unredacted URL itself is
 already a bearer credential. The receiver URL must still use HTTPS and its
 exact hostname must be present in `JCDS_METRICS_WEBHOOK_ALLOWED_HOSTS`.
 
-### 9.3 Validate and start
+### 9.3 Select API and webhook consumers
+
+API-only operation requires no webhook URL or allowlist:
+
+```text
+JCDS_METRICS_API_ENABLED=true
+JCDS_METRICS_WEBHOOK_ENABLED=false
+```
+
+To retain Power Automate delivery and also expose the API:
+
+```text
+JCDS_METRICS_API_ENABLED=true
+JCDS_METRICS_WEBHOOK_ENABLED=true
+```
+
+An existing webhook installation must add
+`JCDS_METRICS_WEBHOOK_ENABLED=true` during upgrade because both consumers are
+now explicit opt-ins. When it is `false`, URL, allowlist and authentication
+settings are ignored.
+
+### 9.4 Validate and start
 
 Set the `JCDS_METRICS_*` values in `deployment.production.env`, then validate
 and start the stack with both Compose files:
@@ -351,15 +389,15 @@ docker compose \
 
 Never use `down --volumes` for monitoring changes.
 
-### 9.4 Acceptance
+### 9.5 Acceptance
 
 The first report is emitted immediately after maintainer start. The following
 values are therefore expected and are not failures:
 
 - `sequence: 1`;
 - `uptime_seconds: 0` or another very small value;
-- `reporter.previous_delivery_succeeded: false`, because no previous delivery
-  exists yet; and
+- with webhook enabled, `reporter.previous_delivery_succeeded: false`, because
+  no previous delivery exists yet; and
 - zero traffic counters on a new installation.
 
 Readiness can already be `true` in the first report. If the gateway is still
@@ -368,8 +406,10 @@ starting, the first report can instead show `ready: false` and
 intervals, acceptance requires a fresh report with:
 
 - `health.ready: true` and `health.gateway_status: 200`;
-- `reporter.previous_delivery_succeeded: true` and
-  `reporter.consecutive_failures: 0`;
+- with webhook enabled, `reporter.webhook_enabled: true`,
+  `reporter.previous_delivery_succeeded: true` and
+  `reporter.consecutive_failures: 0`; with API-only mode,
+  `reporter.webhook_enabled: false`;
 - stable instance UUID;
 - expected TLS subject, expiry date and `expiry_status: ok`; and
 - the configured inventory mode.
@@ -379,8 +419,28 @@ metadata. Leaving either as `unknown` does not affect health, delivery, cache
 operation, or acceptance. In `full` inventory mode, no item list is expected
 while `package_count` is zero; it appears after a package has been cached.
 
-Omitting the override leaves reporting disabled. Invalid optional reporter
-configuration is logged and disables only reporting; maintainer health, the
+When the API is enabled, verify it without printing private deployment values:
+
+```bash
+curl --fail --silent --show-error \
+  --dump-header /tmp/jcds-metrics.headers \
+  "https://jcds-cache.appfruit.ch:8443/health/metrics" \
+  --output /tmp/jcds-metrics.json
+
+grep -Ei '^(HTTP/|Content-Type:|Cache-Control:|X-JCDS-Metrics-Event-ID:)' \
+  /tmp/jcds-metrics.headers
+jq '{schema_version, event_id, sequence, observed_at, health, reporter}' \
+  /tmp/jcds-metrics.json
+```
+
+Two repeated GETs inside one snapshot interval must return the same event ID
+and byte-identical body. When the API is disabled, the same URL must return
+`404`. API-only mode must continue producing increasing snapshot sequences
+without any webhook configuration or delivery warnings.
+
+Omitting the override leaves both optional consumers disabled. Invalid shared
+snapshot configuration disables collection; invalid webhook-only configuration
+disables only webhook delivery. Maintainer health, the
 access index and cleanup remain operational. Set `JCDS_METRICS_RUNTIME_DIR` to
 the directory created above. Docker mounts it read-only. Only the copied public
 `fullchain.pem` and dedicated HMAC secret are visible; the TLS private key is

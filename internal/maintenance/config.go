@@ -52,10 +52,11 @@ func LoadConfig() (Config, error) {
 	}
 	c.Metrics, err = loadMetricsConfig()
 	if err != nil {
-		// Reporting is deliberately fail-open: invalid optional monitoring must
+		// Metrics are deliberately fail-open: invalid optional monitoring must
 		// never prevent cleanup, health endpoints or package delivery.
 		c.Metrics.ConfigError = err
-		c.Metrics.Enabled = false
+		c.Metrics.APIEnabled = false
+		c.Metrics.WebhookEnabled = false
 	}
 	return c, nil
 }

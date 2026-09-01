@@ -31,8 +31,10 @@ import (
 )
 
 type MetricsConfig struct {
-	Enabled           bool
-	ConfigError       error
+	APIEnabled         bool
+	WebhookEnabled     bool
+	ConfigError        error
+	WebhookConfigError error
 	URL               *url.URL
 	Interval          time.Duration
 	Timeout           time.Duration
@@ -56,16 +58,33 @@ type MetricsConfig struct {
 }
 
 func loadMetricsConfig() (MetricsConfig, error) {
-	c := MetricsConfig{Enabled: strings.EqualFold(value("METRICS_WEBHOOK_ENABLED", "false"), "true")}
-	if !c.Enabled {
+	c := MetricsConfig{
+		APIEnabled:     strings.EqualFold(value("METRICS_API_ENABLED", "false"), "true"),
+		WebhookEnabled: strings.EqualFold(value("METRICS_WEBHOOK_ENABLED", "false"), "true"),
+	}
+	if !c.APIEnabled && !c.WebhookEnabled {
 		return c, nil
 	}
 	var err error
-	c.Interval, err = duration("METRICS_WEBHOOK_INTERVAL", time.Minute)
+	intervalDefault := time.Minute
+	if legacy := strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_INTERVAL")); legacy != "" {
+		intervalDefault, err = time.ParseDuration(legacy)
+		if err != nil {
+			return c, fmt.Errorf("METRICS_WEBHOOK_INTERVAL: %w", err)
+		}
+	}
+	c.Interval, err = duration("METRICS_SNAPSHOT_INTERVAL", intervalDefault)
 	if err != nil {
 		return c, err
 	}
-	c.Timeout, err = duration("METRICS_WEBHOOK_TIMEOUT", 10*time.Second)
+	timeoutDefault := 10 * time.Second
+	if legacy := strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_TIMEOUT")); legacy != "" {
+		timeoutDefault, err = time.ParseDuration(legacy)
+		if err != nil {
+			return c, fmt.Errorf("METRICS_WEBHOOK_TIMEOUT: %w", err)
+		}
+	}
+	c.Timeout, err = duration("METRICS_SNAPSHOT_TIMEOUT", timeoutDefault)
 	if err != nil {
 		return c, err
 	}
@@ -77,30 +96,10 @@ func loadMetricsConfig() (MetricsConfig, error) {
 	if err != nil {
 		return c, err
 	}
-	c.URL, err = url.Parse(strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_URL")))
-	if err != nil || c.URL.Scheme != "https" || c.URL.Hostname() == "" || c.URL.User != nil || c.URL.Fragment != "" {
-		return c, errors.New("METRICS_WEBHOOK_URL must be an exact HTTPS URL without credentials or fragment")
-	}
-	c.AllowedHosts = make(map[string]struct{})
-	for _, host := range strings.Split(os.Getenv("METRICS_WEBHOOK_ALLOWED_HOSTS"), ",") {
-		host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-		if host != "" {
-			c.AllowedHosts[host] = struct{}{}
-		}
-	}
-	if _, ok := c.AllowedHosts[strings.ToLower(strings.TrimSuffix(c.URL.Hostname(), "."))]; !ok {
-		return c, errors.New("webhook hostname is not in METRICS_WEBHOOK_ALLOWED_HOSTS")
-	}
-	c.AllowPrivateIPs = strings.EqualFold(value("METRICS_WEBHOOK_ALLOW_PRIVATE_IPS", "false"), "true")
-	c.AuthMode = strings.ToLower(value("METRICS_WEBHOOK_AUTH_MODE", "none"))
-	c.HMACSecretFile = strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_HMAC_SECRET_FILE"))
-	if c.AuthMode != "none" && c.AuthMode != "hmac" {
-		return c, errors.New("METRICS_WEBHOOK_AUTH_MODE must be none or hmac")
-	}
-	if c.AuthMode == "hmac" && !filepath.IsAbs(c.HMACSecretFile) {
-		return c, errors.New("HMAC secret file must be absolute")
-	}
 	c.InstanceName = strings.TrimSpace(os.Getenv("METRICS_INSTANCE_NAME"))
+	if c.InstanceName == "" {
+		return c, errors.New("METRICS_INSTANCE_NAME is required when metrics are enabled")
+	}
 	c.InstanceUUID = strings.TrimSpace(os.Getenv("METRICS_INSTANCE_UUID"))
 	c.InstanceFQDN = strings.TrimSpace(os.Getenv("METRICS_INSTANCE_FQDN"))
 	c.InstanceVersion = value("METRICS_INSTANCE_VERSION", "unknown")
@@ -123,14 +122,48 @@ func loadMetricsConfig() (MetricsConfig, error) {
 	if err != nil || health.Scheme != "http" || health.Hostname() == "" {
 		return c, errors.New("METRICS_HEALTH_URL must be an internal HTTP URL")
 	}
-	c.MaxAttempts, err = positiveInt("METRICS_WEBHOOK_MAX_ATTEMPTS", 3)
-	if err != nil || c.MaxAttempts > 5 {
-		return c, errors.New("METRICS_WEBHOOK_MAX_ATTEMPTS must be between 1 and 5")
-	}
 	if c.Interval < 10*time.Second || c.Timeout <= 0 || c.Timeout >= c.Interval || c.TLSCriticalBefore <= 0 || c.TLSWarningBefore < c.TLSCriticalBefore {
 		return c, errors.New("invalid metrics timing configuration")
 	}
+	if c.WebhookEnabled {
+		if err := loadWebhookConfig(&c); err != nil {
+			c.WebhookConfigError = err
+			c.WebhookEnabled = false
+		}
+	}
 	return c, nil
+}
+
+func loadWebhookConfig(c *MetricsConfig) error {
+	var err error
+	c.URL, err = url.Parse(strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_URL")))
+	if err != nil || c.URL.Scheme != "https" || c.URL.Hostname() == "" || c.URL.User != nil || c.URL.Fragment != "" {
+		return errors.New("METRICS_WEBHOOK_URL must be an exact HTTPS URL without credentials or fragment")
+	}
+	c.AllowedHosts = make(map[string]struct{})
+	for _, host := range strings.Split(os.Getenv("METRICS_WEBHOOK_ALLOWED_HOSTS"), ",") {
+		host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+		if host != "" {
+			c.AllowedHosts[host] = struct{}{}
+		}
+	}
+	if _, ok := c.AllowedHosts[strings.ToLower(strings.TrimSuffix(c.URL.Hostname(), "."))]; !ok {
+		return errors.New("webhook hostname is not in METRICS_WEBHOOK_ALLOWED_HOSTS")
+	}
+	c.AllowPrivateIPs = strings.EqualFold(value("METRICS_WEBHOOK_ALLOW_PRIVATE_IPS", "false"), "true")
+	c.AuthMode = strings.ToLower(value("METRICS_WEBHOOK_AUTH_MODE", "none"))
+	c.HMACSecretFile = strings.TrimSpace(os.Getenv("METRICS_WEBHOOK_HMAC_SECRET_FILE"))
+	if c.AuthMode != "none" && c.AuthMode != "hmac" {
+		return errors.New("METRICS_WEBHOOK_AUTH_MODE must be none or hmac")
+	}
+	if c.AuthMode == "hmac" && !filepath.IsAbs(c.HMACSecretFile) {
+		return errors.New("HMAC secret file must be absolute")
+	}
+	c.MaxAttempts, err = positiveInt("METRICS_WEBHOOK_MAX_ATTEMPTS", 3)
+	if err != nil || c.MaxAttempts > 5 {
+		return errors.New("METRICS_WEBHOOK_MAX_ATTEMPTS must be between 1 and 5")
+	}
+	return nil
 }
 
 func positiveInt(name string, fallback int) (int, error) {
@@ -264,10 +297,64 @@ type Reporter struct {
 	Cleanup                       *CleanupTracker
 	Started                       time.Time
 	Client                        *http.Client
+	Snapshots                     *SnapshotStore
 	now                           func() time.Time
 	sequence                      uint64
 	previousOK                    bool
 	consecutiveFailures           int
+}
+
+type SnapshotStore struct {
+	mu      sync.RWMutex
+	body    []byte
+	eventID string
+}
+
+func (s *SnapshotStore) Store(body []byte, eventID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.body = append(s.body[:0], body...)
+	s.eventID = eventID
+}
+
+func (s *SnapshotStore) Load() ([]byte, string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.body) == 0 {
+		return nil, "", false
+	}
+	return append([]byte(nil), s.body...), s.eventID, true
+}
+
+func (s *SnapshotStore) Handler(enabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if !enabled {
+			http.NotFound(w, request)
+			return
+		}
+		if request.Method != http.MethodGet && request.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, eventID, ok := s.Load()
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if request.Method != http.MethodHead {
+				_, _ = w.Write([]byte(`{"status":"metrics_unavailable"}`))
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-JCDS-Metrics-Event-ID", eventID)
+		w.WriteHeader(http.StatusOK)
+		if request.Method != http.MethodHead {
+			_, _ = w.Write(body)
+		}
+	}
 }
 
 type packageItem struct {
@@ -291,7 +378,7 @@ type cacheSnapshot struct {
 }
 
 func (r *Reporter) Run(ctx context.Context) {
-	if !r.Config.Enabled {
+	if !r.Config.APIEnabled && !r.Config.WebhookEnabled {
 		return
 	}
 	if r.Started.IsZero() {
@@ -300,36 +387,51 @@ func (r *Reporter) Run(ctx context.Context) {
 	if r.now == nil {
 		r.now = time.Now
 	}
-	if r.Client == nil {
+	if r.Snapshots == nil {
+		r.Snapshots = &SnapshotStore{}
+	}
+	if r.Config.WebhookEnabled && r.Client == nil {
 		r.Client = secureWebhookClient(r.Config)
 	}
 	ticker := time.NewTicker(r.Config.Interval)
 	defer ticker.Stop()
-	r.deliver(ctx)
+	r.collect(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.deliver(ctx)
+			r.collect(ctx)
 		}
 	}
 }
 
-func (r *Reporter) deliver(ctx context.Context) {
+func (r *Reporter) collect(ctx context.Context) {
 	body, eventID, err := r.snapshot()
 	if err != nil {
-		slog.Warn("webhook snapshot failed", "error", err)
+		slog.Warn("metrics snapshot failed", "error", err)
 		return
 	}
+	if r.Snapshots != nil {
+		r.Snapshots.Store(body, eventID)
+	}
+	if !r.Config.WebhookEnabled {
+		return
+	}
+	r.deliver(ctx, body, eventID)
+}
+
+func (r *Reporter) deliver(ctx context.Context, body []byte, eventID string) {
 	secret := []byte(nil)
 	if r.Config.AuthMode == "hmac" {
+		var err error
 		secret, err = readHMACSecret(r.Config.HMACSecretFile)
 		if err != nil {
 			slog.Warn("webhook authentication unavailable", "error", err)
 			return
 		}
 	}
+	var err error
 	for attempt := 1; attempt <= r.Config.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			select {
@@ -471,9 +573,10 @@ func (r *Reporter) snapshot() ([]byte, string, error) {
 		GatewayStatus int       `json:"gateway_status"`
 		CheckedAt     time.Time `json:"checked_at"`
 	}{ready, status, now}, tls, storage, cache, r.Traffic.Take(now), r.Cleanup.Snapshot(), struct {
-		Previous bool `json:"previous_delivery_succeeded"`
-		Failures int  `json:"consecutive_failures"`
-	}{r.previousOK, r.consecutiveFailures}}
+		WebhookEnabled bool `json:"webhook_enabled"`
+		Previous       bool `json:"previous_delivery_succeeded"`
+		Failures       int  `json:"consecutive_failures"`
+	}{r.Config.WebhookEnabled, r.previousOK, r.consecutiveFailures}}
 	body, err := json.Marshal(payload)
 	return body, eventID, err
 }

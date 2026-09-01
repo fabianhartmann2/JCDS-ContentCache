@@ -166,9 +166,11 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
 - [x] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
+- [x] Decouple snapshot collection from webhook delivery and add a default-disabled, unauthenticated `/health/metrics` consumer that works in API-only mode.
 - [x] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
 - [x] Add exact receiver-host validation, redirect rejection, bounded in-memory retry and HMAC authentication.
 - [x] Connect webhook snapshots to the approved Power Automate HTTPS receiver and validate target-Mac delivery.
+- [ ] Validate API-only, API-plus-webhook and disabled `/health/metrics` behavior on the target Mac.
 - [ ] Decide whether and where sanitized NGINX behavior logs are collected centrally.
 - [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
 - [ ] Retain an external HTTPS probe because an in-container snapshot cannot prove managed-client reachability or macOS/Docker Desktop health.
@@ -230,7 +232,7 @@ implementation or production gate.
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
 | OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
 | OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
-| OQ-10 | Monitoring and alerting platform | Medium | POWER AUTOMATE DELIVERY VALIDATED; OPERATIONS PENDING | Existing cache-maintainer sends configurable periodic HTTPS snapshots; target-Mac delivery is validated and webhook failure is isolated from serving and cleanup | Assign receiver/alert owner, retention, escalation and signed-URL rotation |
+| OQ-10 | Monitoring and alerting platform | Medium | WEBHOOK VALIDATED; METRICS API ACCEPTANCE PENDING | One collector feeds independent unauthenticated API and HTTPS webhook consumers; target-Mac webhook delivery is validated | Validate disabled/API-only/combined modes; assign receiver/alert owner, retention, escalation and signed-URL rotation |
 | OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
 | OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
 | OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Implement controller; cold-boot test deferred |

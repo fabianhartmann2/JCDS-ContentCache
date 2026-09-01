@@ -127,12 +127,13 @@ server platform.
 | AD-10 | Docker Desktop runs under a dedicated macOS account and fully automatic recovery must be demonstrated. |
 | AD-11 | Production package storage uses a Docker named volume in Docker Desktop's APFS-backed VM disk image. |
 | AD-12 | Prefer a non-root helper; UID 0 requires explicit approval and retains all-capabilities-dropped, no-new-privileges and read-only-root controls. |
-| AD-13 | Extend the existing cache-maintainer with an optional HTTPS webhook reporter; receiver failure must never affect package delivery, cleanup or readiness. |
+| AD-13 | Extend the cache-maintainer with one periodic snapshot collector and two independent default-disabled consumers: unauthenticated `/health/metrics` and HTTPS webhook delivery. Neither consumer may affect package delivery, cleanup or readiness. |
 | AD-14 | Coalesce concurrent full GET misses into one JCDS transfer and stream followers from the growing private temporary file; Range followers wait for verified publication. |
 
-The reporter design, payload and privacy boundary are specified in
-`docs/webhook-monitoring.md`. Phase 1 is implemented behind an explicit
-Compose override and remains disabled by default. It intentionally does
+The snapshot/API/webhook design, payload and privacy boundary are specified in
+`docs/webhook-monitoring.md`. Both consumers are implemented behind an explicit
+Compose override and remain disabled by default. The API intentionally has no
+authentication and inherits the accepted route-reachable TLS boundary. It does
 not receive the Docker socket; macOS, Docker Desktop and real client
 reachability require host-side or external observation. Target-Mac delivery to
 the approved Power Automate HTTPS receiver is validated; alert routing,

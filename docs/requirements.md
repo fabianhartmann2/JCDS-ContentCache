@@ -609,18 +609,28 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 | Upstream policy | allowed signed-URL host patterns, redirect limit, DNS/IP restrictions, TLS trust                                                  |
 | Package store   | container root/temporary paths, Docker volume or APFS backing path, Docker disk-image location/limit, cleanup, lock timeout, minimum free space, ownership and permissions |
 | HTTP            | connect/read/send timeouts, maximum package size, range policy, client-abort behaviour                                            |
-| Observability   | log format/level, correlation header, webhook enablement/URL/interval/timeout, instance identity, inventory mode, receiver allowlist and authentication reference |
+| Observability   | log format/level, correlation header, independent metrics-API/webhook enablement, snapshot interval/timeout, instance identity, inventory mode, receiver URL/allowlist and authentication reference |
 
 ### 13.3 Monitoring and alerting
 
 The baseline NGINX behavior-log schema and privacy boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata, but it must not reintroduce the excluded URI, package identity, raw headers, credentials or signed URLs.
 
-The implemented reporting integration is an optional periodic HTTPS webhook sender
-inside the existing cache-maintainer. Its versioned contract, configurable
-interval, stable identity, inventory modes, transport controls, failure
-isolation and acceptance tests are defined in
-`docs/webhook-monitoring.md`. The feature is disabled by default. Webhook
-failure must not affect delivery, cleanup, readiness or container health.
+The implemented monitoring integration is a periodic snapshot collector inside
+the existing cache-maintainer. Independent, default-disabled consumers expose
+the latest snapshot through unauthenticated `GET /health/metrics` and/or send
+the exact same JSON bytes to an HTTPS webhook. Its versioned contract,
+configurable interval, stable identity, inventory modes, transport controls,
+failure isolation and acceptance tests are defined in
+`docs/webhook-monitoring.md`. API reads must never regenerate a snapshot or
+reset traffic counters. Webhook failure must not affect the API, delivery,
+cleanup, readiness or container health.
+
+When enabled, `/health/metrics` is reachable through the existing production
+TLS listener without authentication. Because the accepted deployment has no
+source filter, every route-reachable client can read the configured snapshot,
+including package names in `full` mode. This is an explicit accepted disclosure
+boundary; credentials, tokens, signed URLs, client addresses and raw request
+identifiers remain prohibited.
 The snapshot must include the configured public TLS certificate's expiration
 time, remaining lifetime and derived `ok`, `warning`, `critical`, `expired` or
 `unknown` status. The maintainer must not receive the TLS private key. An
@@ -777,8 +787,8 @@ The following items are intentionally explicit. Recommended defaults permit deta
 
 #### OQ-10 — Monitoring platform (POWER AUTOMATE DELIVERY VALIDATED; OPERATIONS PENDING)
 
-- **Decision:** Use the implemented cache-maintainer HTTPS reporter and the approved Power Automate receiver with a protected signed trigger URL and no additional HMAC. Target-Mac delivery of readiness, TLS, capacity, lifecycle and full-inventory state is validated using the privacy-bounded contract in `docs/webhook-monitoring.md`.
-- **Required follow-up:** Assign receiver and alert ownership, retention, escalation and signed-URL rotation. Retain an external probe for macOS/Docker Desktop and real client reachability.
+- **Decision:** Use one implemented cache-maintainer snapshot collector with independent unauthenticated metrics API and HTTPS webhook consumers. The approved Power Automate receiver uses a protected signed trigger URL and no additional HMAC. Target-Mac webhook delivery is validated; API-only and combined target-Mac acceptance remain. The API is an explicit opt-in disclosure to every route-reachable client.
+- **Required follow-up:** Validate disabled, API-only and combined modes on the target Mac; assign receiver and alert ownership, retention, escalation and signed-URL rotation. Retain an external probe for macOS/Docker Desktop and real client reachability.
 - **Required by:** Operations readiness
 
 #### OQ-11 — Path model (RESOLVED)

@@ -122,12 +122,14 @@ docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
 
 See [Client request monitoring](docs/client-request-monitoring.md) for the schema, privacy boundary, request classifications, example analyses, proxy caveats, and production guidance.
 
-The optional monitoring integration lets the existing cache-maintainer send a periodic,
-privacy-bounded service snapshot to a configurable HTTPS webhook. The reporter
-is disabled by default and is deliberately decoupled from delivery, cleanup and
-readiness. It is enabled with the separate
+The optional monitoring integration lets the existing cache-maintainer create
+a periodic privacy-bounded service snapshot. Independently enabled consumers
+can expose the latest snapshot without authentication at `/health/metrics`
+through the production TLS listener and/or send the exact same JSON bytes to a
+configurable HTTPS webhook. Both consumers are disabled by default and are
+deliberately decoupled from delivery, cleanup and readiness. They are configured with the separate
 `deploy/macos-production/compose.monitoring.yaml` override. See
-[Webhook monitoring](docs/webhook-monitoring.md) for the implemented payload,
+[Metrics API and webhook monitoring](docs/webhook-monitoring.md) for the implemented payload,
 configuration, security controls, validated Power Automate delivery and
 remaining operational gates.
 

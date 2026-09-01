@@ -1,6 +1,7 @@
 package maintenance
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -25,46 +26,74 @@ import (
 )
 
 func TestMetricsDisabledByDefault(t *testing.T) {
+	t.Setenv("METRICS_API_ENABLED", "")
 	t.Setenv("METRICS_WEBHOOK_ENABLED", "")
 	config, err := loadMetricsConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Enabled {
+	if config.APIEnabled || config.WebhookEnabled {
 		t.Fatal("metrics should be disabled by default")
 	}
 }
 
 func TestInvalidMetricsConfigurationFailsOpen(t *testing.T) {
-	t.Setenv("METRICS_WEBHOOK_ENABLED", "true")
-	t.Setenv("METRICS_WEBHOOK_URL", "http://receiver.example/hook")
+	t.Setenv("METRICS_API_ENABLED", "true")
+	t.Setenv("METRICS_INSTANCE_NAME", "test cache")
+	t.Setenv("METRICS_TLS_CERT_FILE", "relative.pem")
 	config, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Metrics.Enabled || config.Metrics.ConfigError == nil {
-		t.Fatalf("invalid optional reporter was not disabled safely: %+v", config.Metrics)
+	if config.Metrics.APIEnabled || config.Metrics.WebhookEnabled || config.Metrics.ConfigError == nil {
+		t.Fatalf("invalid optional metrics were not disabled safely: %+v", config.Metrics)
 	}
 }
 
 func TestMetricsConfigurationRequiresExactAllowedHTTPSHost(t *testing.T) {
+	setSharedMetricsEnvironment(t)
+	t.Setenv("METRICS_API_ENABLED", "true")
 	t.Setenv("METRICS_WEBHOOK_ENABLED", "true")
 	t.Setenv("METRICS_WEBHOOK_URL", "https://receiver.example/hook")
 	t.Setenv("METRICS_WEBHOOK_ALLOWED_HOSTS", "different.example")
-	t.Setenv("METRICS_TLS_CERT_FILE", "/run/tls/fullchain.pem")
-	if _, err := loadMetricsConfig(); err == nil {
-		t.Fatal("unapproved webhook host should be rejected")
-	}
-	t.Setenv("METRICS_WEBHOOK_ALLOWED_HOSTS", "receiver.example")
-	t.Setenv("METRICS_WEBHOOK_AUTH_MODE", "hmac")
-	t.Setenv("METRICS_WEBHOOK_HMAC_SECRET_FILE", "/run/secrets/webhook-hmac")
 	config, err := loadMetricsConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.Enabled || config.URL.Hostname() != "receiver.example" || config.MaxAttempts != 3 {
+	if !config.APIEnabled || config.WebhookEnabled || config.WebhookConfigError == nil {
+		t.Fatal("unapproved webhook host should disable only webhook delivery")
+	}
+	t.Setenv("METRICS_WEBHOOK_ALLOWED_HOSTS", "receiver.example")
+	t.Setenv("METRICS_WEBHOOK_AUTH_MODE", "hmac")
+	t.Setenv("METRICS_WEBHOOK_HMAC_SECRET_FILE", "/run/secrets/webhook-hmac")
+	config, err = loadMetricsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.WebhookEnabled || config.WebhookConfigError != nil || config.URL.Hostname() != "receiver.example" || config.MaxAttempts != 3 {
 		t.Fatalf("unexpected metrics configuration: %+v", config)
 	}
+}
+
+func TestMetricsAPIWorksWithoutWebhookConfiguration(t *testing.T) {
+	setSharedMetricsEnvironment(t)
+	t.Setenv("METRICS_API_ENABLED", "true")
+	t.Setenv("METRICS_WEBHOOK_ENABLED", "false")
+	t.Setenv("METRICS_WEBHOOK_URL", "")
+	t.Setenv("METRICS_WEBHOOK_ALLOWED_HOSTS", "")
+	config, err := loadMetricsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.APIEnabled || config.WebhookEnabled || config.WebhookConfigError != nil || config.URL != nil {
+		t.Fatalf("unexpected API-only metrics configuration: %+v", config)
+	}
+}
+
+func setSharedMetricsEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("METRICS_INSTANCE_NAME", "test cache")
+	t.Setenv("METRICS_TLS_CERT_FILE", "/run/tls/fullchain.pem")
 }
 
 func TestHMACSecretRequiresRestrictedRegularFile(t *testing.T) {
@@ -123,6 +152,47 @@ func TestTrafficCollectorAggregatesAndResetsWindow(t *testing.T) {
 	}
 	if next := collector.Take(now.Add(2 * time.Minute)); next.Requests != 0 || next.WindowSeconds != 60 {
 		t.Fatalf("traffic window did not reset: %+v", next)
+	}
+}
+
+func TestSnapshotStoreHandlerIsOptionalAndSideEffectFree(t *testing.T) {
+	store := &SnapshotStore{}
+
+	disabled := httptest.NewRecorder()
+	store.Handler(false).ServeHTTP(disabled, httptest.NewRequest(http.MethodGet, "/health/metrics", nil))
+	if disabled.Code != http.StatusNotFound {
+		t.Fatalf("disabled endpoint status = %d; want 404", disabled.Code)
+	}
+
+	unavailable := httptest.NewRecorder()
+	store.Handler(true).ServeHTTP(unavailable, httptest.NewRequest(http.MethodGet, "/health/metrics", nil))
+	if unavailable.Code != http.StatusServiceUnavailable || !strings.Contains(unavailable.Body.String(), "metrics_unavailable") {
+		t.Fatalf("uninitialized endpoint response = %d %q", unavailable.Code, unavailable.Body.String())
+	}
+
+	body := []byte(`{"schema_version":1,"event_id":"test-event"}`)
+	store.Store(body, "test-event")
+	for i := 0; i < 2; i++ {
+		response := httptest.NewRecorder()
+		store.Handler(true).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/metrics", nil))
+		if response.Code != http.StatusOK || response.Body.String() != string(body) {
+			t.Fatalf("metrics response = %d %q", response.Code, response.Body.String())
+		}
+		if response.Header().Get("X-JCDS-Metrics-Event-ID") != "test-event" || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("missing metrics response headers: %v", response.Header())
+		}
+	}
+
+	head := httptest.NewRecorder()
+	store.Handler(true).ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/health/metrics", nil))
+	if head.Code != http.StatusOK || head.Body.Len() != 0 {
+		t.Fatalf("HEAD response = %d body=%q", head.Code, head.Body.String())
+	}
+
+	method := httptest.NewRecorder()
+	store.Handler(true).ServeHTTP(method, httptest.NewRequest(http.MethodPost, "/health/metrics", nil))
+	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("invalid method response = %d headers=%v", method.Code, method.Header())
 	}
 }
 
@@ -193,8 +263,10 @@ func TestReporterSignsSnapshotAndRetriesBoundedly(t *testing.T) {
 	}
 	var attempts atomic.Int32
 	var signatureOK atomic.Bool
+	var receivedBody atomic.Value
 	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		body, _ := ioReadAll(request.Body)
+		receivedBody.Store(append([]byte(nil), body...))
 		timestamp := request.Header.Get("X-JCDS-Timestamp")
 		mac := hmac.New(sha256.New, secret)
 		mac.Write([]byte(timestamp))
@@ -223,7 +295,7 @@ func TestReporterSignsSnapshotAndRetriesBoundedly(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
 	reporter := &Reporter{
 		Config: MetricsConfig{
-			Enabled: true, URL: parsed, Interval: time.Minute, Timeout: time.Second,
+			APIEnabled: true, WebhookEnabled: true, URL: parsed, Interval: time.Minute, Timeout: time.Second,
 			AuthMode: "hmac", HMACSecretFile: secretPath,
 			InstanceUUID:  "2b1ab8d0-a064-47ca-af4e-366c53c43f10",
 			InventoryMode: "summary", InventoryMaxItems: 10,
@@ -233,11 +305,72 @@ func TestReporterSignsSnapshotAndRetriesBoundedly(t *testing.T) {
 		},
 		StoreRoot: root, Index: index, Traffic: NewTrafficCollector(now),
 		Cleanup: NewCleanupTracker(90 * 24 * time.Hour), Started: now,
-		Client: receiver.Client(), now: func() time.Time { return now },
+		Client: receiver.Client(), Snapshots: &SnapshotStore{}, now: func() time.Time { return now },
 	}
-	reporter.deliver(context.Background())
+	reporter.collect(context.Background())
 	if attempts.Load() != 2 || !signatureOK.Load() || !reporter.previousOK || reporter.consecutiveFailures != 0 {
 		t.Fatalf("unexpected reporter result: attempts=%d signature=%v previous=%v failures=%d", attempts.Load(), signatureOK.Load(), reporter.previousOK, reporter.consecutiveFailures)
+	}
+	storedBody, storedEventID, ok := reporter.Snapshots.Load()
+	webhookBody, _ := receivedBody.Load().([]byte)
+	if !ok || storedEventID == "" || !bytes.Equal(storedBody, webhookBody) {
+		t.Fatal("webhook and metrics API did not receive the exact same snapshot bytes")
+	}
+}
+
+func TestAPIOnlySnapshotDoesNotRequireOrAttemptWebhook(t *testing.T) {
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer health.Close()
+	root := filepath.Join(t.TempDir(), "packages")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	index, err := LoadIndex(filepath.Join(t.TempDir(), "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	traffic := NewTrafficCollector(now)
+	traffic.Record(TelemetryEvent{Status: 200, Source: "LOCAL", BytesSent: 42, Completion: "complete"})
+	reporter := &Reporter{
+		Config: MetricsConfig{
+			APIEnabled: true, WebhookEnabled: false, Interval: time.Minute, Timeout: time.Second,
+			InstanceName: "API-only cache", InstanceUUID: "2b1ab8d0-a064-47ca-af4e-366c53c43f10",
+			InventoryMode: "summary", InventoryMaxItems: 10,
+			TLSCertFile: writeCertificate(t, now.Add(60 * 24 * time.Hour)),
+			TLSWarningBefore: 30 * 24 * time.Hour, TLSCriticalBefore: 14 * 24 * time.Hour,
+			HealthURL: health.URL,
+		},
+		StoreRoot: root, Index: index, Traffic: traffic,
+		Cleanup: NewCleanupTracker(90 * 24 * time.Hour), Started: now,
+		Snapshots: &SnapshotStore{}, now: func() time.Time { return now.Add(time.Minute) },
+	}
+	reporter.collect(context.Background())
+	body, _, ok := reporter.Snapshots.Load()
+	if !ok {
+		t.Fatal("API-only reporter did not publish a snapshot")
+	}
+	var payload struct {
+		Traffic struct {
+			Requests int64 `json:"requests"`
+		} `json:"traffic"`
+		Reporter struct {
+			WebhookEnabled bool `json:"webhook_enabled"`
+		} `json:"reporter"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Traffic.Requests != 1 || payload.Reporter.WebhookEnabled {
+		t.Fatalf("unexpected API-only payload: %+v", payload)
+	}
+	first := append([]byte(nil), body...)
+	for i := 0; i < 2; i++ {
+		response := httptest.NewRecorder()
+		reporter.Snapshots.Handler(true).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/metrics", nil))
+		if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), first) {
+			t.Fatal("API read changed or regenerated the stored snapshot")
+		}
 	}
 }
 

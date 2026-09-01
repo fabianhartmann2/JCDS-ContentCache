@@ -43,6 +43,8 @@ export JCDS_MAC_PROD_TLS_DIR="${tls_directory}"
 export JCDS_MAC_PROD_LISTEN_IP=127.0.0.1
 export JCDS_MAC_PROD_LISTEN_PORT=18443
 export JCDS_MAC_PROD_IMAGE_TAG=ci
+export JCDS_METRICS_API_ENABLED=true
+export JCDS_METRICS_WEBHOOK_ENABLED=true
 export JCDS_METRICS_WEBHOOK_URL=https://monitoring.example.invalid/jcds-cache
 export JCDS_METRICS_WEBHOOK_ALLOWED_HOSTS=monitoring.example.invalid
 export JCDS_METRICS_RUNTIME_DIR="${monitoring_directory}"
@@ -61,6 +63,16 @@ fi
 
 if ! grep -q 'rewrite \^/Packages/' "${repository_root}/deploy/macos-production/nginx.conf"; then
   echo "The macOS production profile must normalize Jamf /Packages requests" >&2
+  exit 1
+fi
+
+if ! grep -q 'location = /health/metrics' "${repository_root}/deploy/macos-production/nginx.conf"; then
+  echo "The macOS production profile must route the optional metrics API" >&2
+  exit 1
+fi
+
+if grep -q 'JCDS_METRICS_WEBHOOK_URL:?' "${repository_root}/deploy/macos-production/compose.monitoring.yaml"; then
+  echo "Metrics API-only mode must not require a webhook URL" >&2
   exit 1
 fi
 
@@ -141,4 +153,4 @@ docker run --rm \
   "jcds-content-cache-nginx:${JCDS_MAC_PROD_IMAGE_TAG}" \
   nginx -t
 
-echo "macOS production profile smoke test passed: Compose, non-root volume writes, webhook public-certificate/secret mounts, baked NGINX, and TLS paths are valid."
+echo "macOS production profile smoke test passed: Compose, non-root volume writes, optional metrics API/webhook mounts, baked NGINX, and TLS paths are valid."

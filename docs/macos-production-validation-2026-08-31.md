@@ -152,6 +152,8 @@ failure. Application version and commit are optional metadata and may remain
 
 ## Deferred and remaining gates
 
+- Target-Mac acceptance for disabled, API-only and combined
+  `/health/metrics`/webhook modes after the metrics-consumer decoupling.
 - OQ-16 unattended reboot/session recovery: explicitly deferred.
 - OQ-17: final disk sizing, full macOS reboot and Docker Desktop update behavior
   remain; named-volume write, restart persistence and destructive recovery passed.

@@ -41,6 +41,7 @@ func run() error {
 	}
 	traffic := maintenance.NewTrafficCollector(time.Now())
 	cleanupTracker := maintenance.NewCleanupTracker(cfg.Retention)
+	snapshots := &maintenance.SnapshotStore{}
 	packet, err := net.ListenPacket("udp", cfg.UDPListen)
 	if err != nil {
 		return err
@@ -56,6 +57,7 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ready"}`))
 	})
+	mux.HandleFunc("/health/metrics", snapshots.Handler(cfg.Metrics.APIEnabled))
 	httpServer := &http.Server{Addr: cfg.HTTPListen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -121,13 +123,16 @@ func run() error {
 	go func() {
 		defer wait.Done()
 		if cfg.Metrics.ConfigError != nil {
-			slog.Warn("webhook reporter disabled by invalid configuration", "error", cfg.Metrics.ConfigError)
+			slog.Warn("metrics collection disabled by invalid configuration", "error", cfg.Metrics.ConfigError)
 			return
+		}
+		if cfg.Metrics.WebhookConfigError != nil {
+			slog.Warn("webhook reporter disabled by invalid configuration", "error", cfg.Metrics.WebhookConfigError)
 		}
 		reporter := &maintenance.Reporter{
 			Config: cfg.Metrics, StoreRoot: cfg.StoreRoot, Index: index,
 			TriggerPercent: cfg.TriggerPercent, TargetPercent: cfg.TargetPercent,
-			Traffic: traffic, Cleanup: cleanupTracker, Started: time.Now().UTC(),
+			Traffic: traffic, Cleanup: cleanupTracker, Started: time.Now().UTC(), Snapshots: snapshots,
 		}
 		reporter.Run(ctx)
 	}()

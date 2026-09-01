@@ -335,12 +335,12 @@ NGINX behavior records must retain the existing privacy boundary: no package
 name, URI, query, raw range, raw user agent, credentials or signed URL.
 
 The implemented optional monitoring integration extends the existing
-cache-maintainer with a periodic HTTPS webhook reporter. It sends
-stable instance identity, readiness, uptime, storage/cache state, aggregate
-traffic, cleanup outcomes and public TLS certificate expiry using the
-privacy-bounded contract in
-`webhook-monitoring.md`. The webhook is disabled by default and enabled with a
-separate Compose override. Receiver failure must not affect delivery,
+cache-maintainer with one periodic snapshot collector. Independent consumers
+can expose the latest snapshot without authentication at `/health/metrics`
+and/or send the exact same JSON bytes to the HTTPS webhook. Both are disabled
+by default and configured with the separate Compose override. The public API
+inherits the accepted route-reachable TLS boundary and can disclose package
+names when full inventory is selected. API and receiver failure must not affect delivery,
 cleanup, readiness or container health. Operators must retain an external HTTPS
 probe because the container cannot prove macOS/Docker Desktop health, actual
 client-network reachability or which certificate NGINX serves. The reporter's
