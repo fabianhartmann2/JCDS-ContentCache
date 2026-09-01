@@ -213,12 +213,15 @@ authentication material.
 - Never block package delivery, cleanup, readiness or container health because
   the webhook is unavailable.
 
-HMAC-SHA256 is the implemented and recommended authentication mode. The sender
+HMAC-SHA256 is implemented and is recommended for receivers that do not
+provide their own protected signed endpoint. The sender
 includes `X-JCDS-Timestamp`, `X-JCDS-Event-ID` and
 `X-JCDS-Signature: sha256=<digest>`, calculated over
 `timestamp + "\n" + raw JSON body`. The receiver must enforce a clock
-window and deduplicate event IDs. The final receiver and authentication method
-remain operational decisions; bearer tokens or mTLS may be selected if the
+window and deduplicate event IDs. The accepted Power Automate deployment uses
+its protected signed trigger URL with `METRICS_WEBHOOK_AUTH_MODE=none`; that
+URL is bearer-equivalent secret material and requires controlled storage and
+rotation. Bearer headers or mTLS may be selected for a future receiver if the
 enterprise platform requires them.
 
 ## 7. Suggested alerts
@@ -393,8 +396,7 @@ helper metrics endpoint and are not emitted as misleading zero values.
 
 - Power Automate receiver ownership and retention policy;
 - signed trigger URL rotation and secure distribution ownership;
-- receiver hostname/address allowlist and enterprise trust chain;
 - alert recipients, thresholds and escalation path;
-- whether `full` inventory is permitted in production; and
+- retention and handling policy for the accepted `full` package inventory; and
 - receiver rate limits and whether a bounded disk spool is required; phase 1
   retries the current snapshot in memory and retains no backlog.

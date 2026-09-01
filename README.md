@@ -14,7 +14,7 @@ NGINX normalizes both internally to the same canonical file; no redirect or
 duplicate cache entry is created.
 
 > [!IMPORTANT]
-> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup and destructive empty-volume recovery are validated for the pilot. Unattended startup, final capacity qualification, certificate renewal and monitoring ownership remain production gates.
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup, destructive empty-volume recovery and Power Automate webhook delivery are validated for the pilot. Unattended startup, final capacity qualification, certificate renewal and monitoring operations ownership remain production gates.
 
 ## Current milestone
 
@@ -128,7 +128,8 @@ is disabled by default and is deliberately decoupled from delivery, cleanup and
 readiness. It is enabled with the separate
 `deploy/macos-production/compose.monitoring.yaml` override. See
 [Webhook monitoring](docs/webhook-monitoring.md) for the implemented payload,
-configuration, security controls and remaining acceptance gates.
+configuration, security controls, validated Power Automate delivery and
+remaining operational gates.
 
 ## Sanitized live-contract capture
 
@@ -172,7 +173,7 @@ deploy/compose/         Local development stack
 deploy/contract-capture/ Hardened one-shot live validation image
 deploy/macos/           Localhost-only real-backend Docker Desktop test
 deploy/nginx/           Development and production NGINX templates
-deploy/production/      Superseded Linux candidate retained pending macOS replacement
+deploy/production/      Superseded Linux candidate retained temporarily for reference
 docs/                   Architecture, requirements, execution plan and contract evidence
 ```
 

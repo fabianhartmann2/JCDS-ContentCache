@@ -32,19 +32,21 @@ The existing profiles have different purposes:
 | Outbound network | Direct validated HTTPS; no proxy or TLS inspection |
 | Package integrity | Exact Jamf catalog length and SHA3-512 before atomic publication |
 
-## Production blockers
+## Remaining production gates
 
 Production-pilot approval still requires closure of:
 
-1. Mac model, Apple silicon generation, RAM, storage and network interface.
-2. Paid Docker Desktop subscription ownership, renewal and support contacts; entitlement is available.
-3. Dedicated macOS account and unattended restart/session model.
-4. Final named-volume capacity sizing and confirmation of the required macOS visibility semantics; isolated destructive recovery has passed.
-5. Production helper UID model for the selected storage implementation.
+1. Demonstrate unattended restart/session recovery from Mac power-on to healthy HTTPS.
+2. Record final Docker Desktop CPU, memory, disk-image, Resource Saver and update policy.
+3. Qualify final named-volume capacity, representative large-file performance,
+   macOS reboot and Docker Desktop update behavior.
+4. Assign certificate-renewal ownership and implement unattended renewal before
+   final production approval.
+5. Assign Power Automate receiver, alert, retention, escalation and signed-URL
+   rotation ownership, plus the availability SLO.
 
-The pilot additionally requires Docker resource/update policy,
-certificate-renewal ownership, monitoring ownership and SLO. Cache retention
-and rebuild policy are resolved for the pilot.
+Hardware, helper identity, named-volume visibility, cache retention, rebuild
+policy, trusted TLS and target-Mac webhook delivery are resolved for the pilot.
 
 ## Recommended host baseline
 
@@ -127,14 +129,16 @@ Docker commands or purpose-built administrative commands. The service owner
 has confirmed that this satisfies the macOS visibility requirement; native
 Finder visibility is not required.
 
-The named volume is not approved for pilot use until testing proves:
+The named-volume model is accepted for the pilot. Completed target-Mac tests
+prove same-filesystem publication, cross-container permissions, serving-
+container restart persistence, administrative inspection through Docker and
+destructive empty-volume recovery. Final production approval still requires:
 
 - sustained large-file throughput;
-- same-filesystem atomic rename;
-- stable permissions across containers and reboots;
 - correct Docker Desktop disk-image sizing and APFS free-space monitoring;
 - behaviour across Docker Desktop and macOS updates;
-- safe macOS-initiated inventory, pre-population, export and cleanup.
+- full Mac reboot persistence; and
+- representative capacity and concurrent-load qualification.
 
 The qualification must use representative multi-gigabyte packages, concurrent
 readers, an interrupted fill, container recreation, Docker Desktop restart,

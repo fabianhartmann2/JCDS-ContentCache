@@ -8,15 +8,15 @@ excludes the package filename, Jamf tenant, JCDS/CDN hostname, OAuth values,
 signed URL, private key and unsanitized helper logs.
 
 This is engineering acceptance evidence, not final production approval.
-Unattended reboot recovery, resource/update policy, monitoring and
-certificate-renewal ownership remain open.
+Unattended reboot recovery, resource/update policy, Power Automate alert and
+retention ownership, and certificate-renewal ownership remain open.
 
 ## Validated target
 
 | Item | Evidence |
 |---|---|
 | Host | Dedicated Mac running licensed Docker Desktop |
-| Profile | `deploy/macos-production/compose.yaml` |
+| Profile | `deploy/macos-production/compose.yaml` plus the optional monitoring override for webhook acceptance |
 | Listener | Trusted HTTPS on `jcds-cache.appfruit.ch:8443` |
 | Certificate | DNS SAN matched; issued by `Post CH AG JSS Built-in Certificate Authority`; clients trust the issuer |
 | Storage | Docker named volume `jcds-content-cache-macos-production_package-store` |

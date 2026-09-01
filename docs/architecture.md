@@ -1,8 +1,8 @@
 # Production architecture
 
-**Status:** Draft for production-target review  
+**Status:** Production candidate implemented and validated; operational approval pending
 **Target:** Dedicated Mac running Docker Desktop  
-**Last updated:** 31 August 2026
+**Last updated:** 1 September 2026
 
 ## 1. Architecture decision
 
@@ -134,7 +134,9 @@ The reporter design, payload and privacy boundary are specified in
 `docs/webhook-monitoring.md`. Phase 1 is implemented behind an explicit
 Compose override and remains disabled by default. It intentionally does
 not receive the Docker socket; macOS, Docker Desktop and real client
-reachability require host-side or external observation.
+reachability require host-side or external observation. Target-Mac delivery to
+the approved Power Automate HTTPS receiver is validated; alert routing,
+retention and operational ownership remain open.
 
 ## 8. Blocking production decisions
 

@@ -4,7 +4,7 @@
 
 **Version:** 0.8
 
-**Date:** 31 August 2026
+**Date:** 1 September 2026
 
 **Owner:** Mac Workplace
 
@@ -32,10 +32,10 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 | V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
 | Initial client population | 500–2,000 managed Macs |
 | Initial package working set | Approximately 500–600 GB, retaining at least 30% package-store free space |
-| Host baseline | Dedicated Mac on a supported macOS release; exact hardware and resources remain open |
+| Host baseline | Dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage |
 | Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
 | Client access | Server-authenticated TLS with no source-CIDR filtering or client authentication; any route-reachable client may request packages |
-| Package-store mount | Docker named volume at `/srv/jamf-store`; macOS administrative visibility and production qualification pending |
+| Package-store mount | Docker named volume at `/srv/jamf-store`; macOS administrative visibility, permissions, restart persistence and empty-volume recovery validated; final capacity/reboot/update qualification pending |
 | DNS and certificate | Manual DNS records and an initial certificate obtained through manual DNS validation; unattended renewal remains a production gate |
 | Secret delivery | Root-owned host environment file, mode `0600`, passed to the helper by Docker Compose |
 | Outbound network | Direct HTTPS; no proxy or TLS inspection |
@@ -159,20 +159,21 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 **Goal:** Deploy a controlled production candidate using real enterprise services.
 
-- [ ] Provision the dedicated Mac, managed Docker Desktop, persistent storage, DNS and egress rules; no inbound source filter is required by the accepted design.
+- [x] Provision the dedicated Mac, Docker Desktop, persistent storage and DNS; no inbound source filter is required by the accepted design.
 - [x] Add a host-specific Compose definition, NGINX TLS configuration, environment templates, certificate check and deployment/rollback runbook.
-- [ ] Issue the initial certificate through manual DNS validation and establish an automated renewal method before production approval.
-- [ ] Provision the least-privilege Jamf API client and install its secret in the root-owned host environment file.
+- [x] Issue and install the initial enterprise-trusted certificate; establish an automated renewal method before final production approval.
+- [x] Provision the Jamf API client and install its secret in the protected mode-`0600` host environment file.
 - [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
 - [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
 - [x] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
 - [x] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
 - [x] Add exact receiver-host validation, redirect rejection, bounded in-memory retry and HMAC authentication.
-- [ ] Connect webhook snapshots and sanitized logs to the selected monitoring platform.
+- [x] Connect webhook snapshots to the approved Power Automate HTTPS receiver and validate target-Mac delivery.
+- [ ] Decide whether and where sanitized NGINX behavior logs are collected centrally.
 - [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
 - [ ] Retain an external HTTPS probe because an in-container snapshot cannot prove managed-client reachability or macOS/Docker Desktop health.
 - [x] Define packages as rebuildable data and pass an isolated destructive empty-volume recovery exercise on the target Mac.
-- [ ] Run a real-tenant smoke test with approved non-sensitive packages.
+- [x] Run real-tenant miss, local-hit, range, restart, helper-outage, concurrent-follower and recovery tests with private package identity.
 - [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
 - [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with privacy-safe monitoring.
 - [x] Implement a separate TLS-enabled `deploy/macos-production/` candidate; do not expose the localhost test profile.
@@ -251,7 +252,11 @@ Repository scaffolding and mock-driven implementation can begin immediately. Rea
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
 
-Availability and monitoring ownership remain open before production approval. Retention and rebuild policy are resolved for the pilot. TLS and secret-delivery decisions are fixed for the controlled pilot, while unattended certificate renewal remains an explicit gate.
+Availability SLO, Power Automate alert/retention ownership and external
+reachability monitoring remain open before production approval. Retention and
+rebuild policy are resolved for the pilot. TLS and secret-delivery decisions
+are fixed for the controlled pilot, while unattended certificate renewal
+remains an explicit gate.
 
 ## 7. Initial repository layout
 

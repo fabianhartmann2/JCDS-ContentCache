@@ -6,7 +6,7 @@
 
 **Version:** 0.8
 
-**Date:** 31 August 2026
+**Date:** 1 September 2026
 
 **Owner:** Mac Workplace
 
@@ -122,7 +122,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | Delivery stage         | Production system                                                                                                                                                          | Resolved            |
 | Package identity       | Package filenames are immutable; the same filename always represents the same bytes.                                                                                       | Resolved            |
 | Initial deployment     | NGINX and the Jamf helper run as containers through Docker Desktop on one dedicated managed Mac.                                                                            | Resolved            |
-| Client namespace       | A stable HTTPS /packages/{filename} endpoint is used.                                                                                                                      | Baseline assumption |
+| Client namespace       | Jamf-compatible `/Packages/{filename}` with lowercase `/packages/{filename}` as an internal compatibility alias; both map to one canonical object.                        | Resolved            |
 | Upstream               | One Jamf Pro tenant and JCDS are used in the first release.                                                                                                                | Baseline assumption |
 | Storage representation | A completed request path maps to the same human-readable local path and filename; for example, /packages/ExampleFile.pkg maps to /srv/jamf-store/packages/ExampleFile.pkg. | Resolved            |
 | Store rebuild          | The package store is derived data and can be rebuilt from JCDS; configuration and secrets require backup, package contents do not.                                         | Baseline assumption |
@@ -131,7 +131,7 @@ Software packages are hosted in JCDS and can only be located through authenticat
 | V1 path scope          | Accept exactly one flat filename segment ending in lowercase `.pkg`; nested paths and additional file types are excluded.                                                   | Resolved            |
 | Initial population     | Design the first release for 500–2,000 managed Macs.                                                                                                                        | Resolved range      |
 | Cache storage          | Target an approximately 500–600 GB package working set on the 1 TB Mac and retain at least 30 percent package-store free space.                                             | In review           |
-| Host baseline          | Use a dedicated Mac running a supported macOS release and managed Docker Desktop; model, resources and unattended-startup design remain open.                              | Partially resolved  |
+| Host baseline          | Use a dedicated wired Mac mini with 24 GB RAM, 1 TB APFS storage and Docker Desktop; unattended startup remains open.                                                       | Partially resolved  |
 | Service endpoint       | Publish HTTPS on `jcds-cache.appfruit.ch:8443`.                                                                                                                             | Resolved            |
 | Client access          | Use server-authenticated TLS without source-CIDR filtering or client authentication; any route-reachable client may request packages.                                      | Resolved            |
 | Storage boundary       | Keep `/srv/jamf-store` as the container path and use a Docker named volume in Docker Desktop's APFS-backed disk image; Docker/administrative access from macOS satisfies the visibility requirement. | Resolved            |
@@ -775,10 +775,10 @@ The following items are intentionally explicit. Recommended defaults permit deta
 - **Decision:** Store the secret as an environment assignment in a root-owned mode-`0600` host file outside Git and let Docker inject it only into the helper container.
 - **Required follow-up:** Exercise rotation through file replacement and helper recreation; restrict Docker administration because privileged operators can inspect container environment values.
 
-#### OQ-10 — Monitoring platform (DESIGN APPROVED; IMPLEMENTATION PENDING)
+#### OQ-10 — Monitoring platform (POWER AUTOMATE DELIVERY VALIDATED; OPERATIONS PENDING)
 
-- **Decision:** Extend the cache-maintainer with a dynamically configured periodic HTTPS webhook reporter using the privacy-bounded contract in `docs/webhook-monitoring.md`.
-- **Required follow-up:** Select the receiver and owner, finalize HMAC/bearer/mTLS authentication, implement and pass the documented acceptance suite, then configure alert ownership and retention.
+- **Decision:** Use the implemented cache-maintainer HTTPS reporter and the approved Power Automate receiver with a protected signed trigger URL and no additional HMAC. Target-Mac delivery of readiness, TLS, capacity, lifecycle and full-inventory state is validated using the privacy-bounded contract in `docs/webhook-monitoring.md`.
+- **Required follow-up:** Assign receiver and alert ownership, retention, escalation and signed-URL rotation. Retain an external probe for macOS/Docker Desktop and real client reachability.
 - **Required by:** Operations readiness
 
 #### OQ-11 — Path model (RESOLVED)
