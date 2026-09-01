@@ -266,6 +266,7 @@ cp deploy/macos-production/deployment.env.example \
   "${runtime_root}/deployment.production.env"
 
 chmod 0600 "${runtime_root}/cache-helper.production.env"
+chmod 0600 "${runtime_root}/deployment.production.env"
 ```
 
 Place `fullchain.pem` and `privkey.pem` in the configured TLS directory and
@@ -292,6 +293,14 @@ docker compose \
 Expected state: `store-init` exited `0`; `cache-helper`, `cache-maintainer` and
 `nginx` are healthy.
 Do not use `down --volumes` during normal restart or upgrade operations.
+
+The two copied files remain the only private environment files used by this
+profile. `cache-helper.production.env` contains Jamf/JCDS helper configuration.
+`deployment.production.env` supplies Compose paths, lifecycle policy and the
+optional webhook settings. Always pass the latter with `--env-file`; do not
+create an additional monitoring environment file. The detailed reporter setup
+and first/second-report acceptance criteria are documented in
+[`webhook-monitoring.md`](webhook-monitoring.md).
 
 The deployment environment also controls the cache lifecycle. The shipped
 defaults retain packages for 90 days (`JCDS_CACHE_RETENTION=2160h`), start

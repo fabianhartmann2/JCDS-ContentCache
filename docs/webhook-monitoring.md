@@ -1,10 +1,10 @@
 # Webhook monitoring
 
-**Status:** Phase 1 implemented; target-Mac acceptance pending
+**Status:** Phase 1 implemented; target-Mac delivery to Power Automate validated
 
 **Target component:** `cache-maintainer`
 
-**Last updated:** 31 August 2026
+**Last updated:** 1 September 2026
 
 ## 1. Purpose and boundary
 
@@ -254,27 +254,79 @@ Automated tests and final target-Mac evidence must prove:
     the certificate actually served to a real client and distinguishes
     container self-health from real client reachability.
 
-## 9. Enable the reporter
+## 9. Enable the reporter on macOS
 
-Create a dedicated monitoring directory outside the checkout, copy only the
-public certificate into it and generate the HMAC secret:
+### 9.1 Use the existing private environment files
+
+The production installation uses exactly two private environment files outside
+the Git checkout:
+
+| File | Purpose |
+|---|---|
+| `cache-helper.production.env` | Jamf/JCDS helper settings and credentials; referenced by the deployment file |
+| `deployment.production.env` | Compose paths, cache lifecycle and all `JCDS_METRICS_*` settings |
+
+Do not create a separate monitoring environment file and do not reconstruct
+configuration from a running container. Set the deployment file once per shell:
+
+```bash
+runtime_root="${HOME}/JCDS-ContentCache-runtime"
+deployment_env="${runtime_root}/deployment.production.env"
+
+test -f "${runtime_root}/cache-helper.production.env"
+test -f "${deployment_env}"
+chmod 0600 \
+  "${runtime_root}/cache-helper.production.env" \
+  "${deployment_env}"
+```
+
+`deployment.production.env` must contain absolute host paths for
+`JCDS_MAC_PROD_HELPER_ENV_FILE`, `JCDS_MAC_PROD_TLS_DIR`, and
+`JCDS_METRICS_RUNTIME_DIR`. The webhook URL belongs only in this protected
+file. A signed Power Automate URL contains bearer-equivalent query material and
+must never be pasted into logs, tickets, documentation, or Compose output.
+
+### 9.2 Prepare the public certificate mount
+
+Create a dedicated monitoring directory outside the checkout and copy only the
+public certificate into it. The maintainer must never receive the private key:
 
 ```bash
 umask 077
 monitoring_dir="${HOME}/JCDS-ContentCache-runtime/monitoring"
 mkdir -p "${monitoring_dir}"
-cp "${JCDS_MAC_PROD_TLS_DIR}/fullchain.pem" \
+cp "${HOME}/JCDS-ContentCache-runtime/tls/fullchain.pem" \
   "${monitoring_dir}/fullchain.pem"
 chmod 0644 "${monitoring_dir}/fullchain.pem"
-openssl rand -hex 32 >"${monitoring_dir}/webhook-hmac.secret"
-sudo chgrp 0 "${monitoring_dir}" \
-  "${monitoring_dir}/webhook-hmac.secret"
+sudo chgrp 0 "${monitoring_dir}"
 chmod 0750 "${monitoring_dir}"
+```
+
+For HMAC mode only, additionally generate and protect the secret:
+
+```bash
+openssl rand -hex 32 >"${monitoring_dir}/webhook-hmac.secret"
+sudo chgrp 0 "${monitoring_dir}/webhook-hmac.secret"
 chmod 0640 "${monitoring_dir}/webhook-hmac.secret"
 ```
 
-Set the `JCDS_METRICS_*` values in the private deployment environment file and
-start the stack with both Compose files:
+Do not create this file when `JCDS_METRICS_WEBHOOK_AUTH_MODE=none`. A signed
+Power Automate trigger URL may use `none` because the unredacted URL itself is
+already a bearer credential. The receiver URL must still use HTTPS and its
+exact hostname must be present in `JCDS_METRICS_WEBHOOK_ALLOWED_HOSTS`.
+
+### 9.3 Validate and start
+
+Set the `JCDS_METRICS_*` values in `deployment.production.env`, then validate
+and start the stack with both Compose files:
+
+```bash
+docker compose \
+  --env-file "${deployment_env}" \
+  --file deploy/macos-production/compose.yaml \
+  --file deploy/macos-production/compose.monitoring.yaml \
+  config --quiet
+```
 
 ```bash
 docker compose \
@@ -283,6 +335,46 @@ docker compose \
   --file deploy/macos-production/compose.monitoring.yaml \
   up --build --detach --force-recreate
 ```
+
+For a monitoring-only configuration change, recreate only the maintainer:
+
+```bash
+docker compose \
+  --env-file "${deployment_env}" \
+  --file deploy/macos-production/compose.yaml \
+  --file deploy/macos-production/compose.monitoring.yaml \
+  up --detach --force-recreate cache-maintainer
+```
+
+Never use `down --volumes` for monitoring changes.
+
+### 9.4 Acceptance
+
+The first report is emitted immediately after maintainer start. The following
+values are therefore expected and are not failures:
+
+- `sequence: 1`;
+- `uptime_seconds: 0` or another very small value;
+- `reporter.previous_delivery_succeeded: false`, because no previous delivery
+  exists yet; and
+- zero traffic counters on a new installation.
+
+Readiness can already be `true` in the first report. If the gateway is still
+starting, the first report can instead show `ready: false` and
+`gateway_status: 0`; the next interval must recover. After two complete
+intervals, acceptance requires a fresh report with:
+
+- `health.ready: true` and `health.gateway_status: 200`;
+- `reporter.previous_delivery_succeeded: true` and
+  `reporter.consecutive_failures: 0`;
+- stable instance UUID;
+- expected TLS subject, expiry date and `expiry_status: ok`; and
+- the configured inventory mode.
+
+`METRICS_INSTANCE_VERSION` and `METRICS_INSTANCE_COMMIT` are optional operator
+metadata. Leaving either as `unknown` does not affect health, delivery, cache
+operation, or acceptance. In `full` inventory mode, no item list is expected
+while `package_count` is zero; it appears after a package has been cached.
 
 Omitting the override leaves reporting disabled. Invalid optional reporter
 configuration is logged and disables only reporting; maintainer health, the
@@ -299,8 +391,8 @@ helper metrics endpoint and are not emitted as misleading zero values.
 
 ## 10. Remaining decisions
 
-- webhook receiver product, endpoint owner and retention policy;
-- HMAC, bearer token or mTLS authentication and secret-rotation owner;
+- Power Automate receiver ownership and retention policy;
+- signed trigger URL rotation and secure distribution ownership;
 - receiver hostname/address allowlist and enterprise trust chain;
 - alert recipients, thresholds and escalation path;
 - whether `full` inventory is permitted in production; and

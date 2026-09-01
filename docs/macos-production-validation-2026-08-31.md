@@ -127,6 +127,29 @@ pilot. Configuration, TLS material, private environment files, the approved
 repository revision and runbooks remain the authoritative recovery inputs and
 must be protected independently.
 
+## Webhook monitoring acceptance — 1 September 2026
+
+The optional monitoring override was enabled on a newly installed production
+Mac and delivered its versioned JSON snapshot to the approved Power Automate
+HTTPS receiver. The private signed trigger URL was not recorded.
+
+| Check | Sanitized result |
+|---|---|
+| Delivery | Power Automate received schema version 1 JSON |
+| Authentication mode | No additional HMAC; signed HTTPS trigger URL treated as a protected bearer credential |
+| Stable identity | Operator name, FQDN and persisted UUID present |
+| Readiness | `ready=true`, gateway status `200` |
+| TLS | Expected subject and expiry parsed; status `ok` |
+| Capacity | Total, available and free-percent fields present; pressure false |
+| Cache | Full inventory mode active; empty new cache reported consistently |
+| Lifecycle | 90-day retention and 30/35-percent cleanup thresholds reported |
+| Privacy | No Jamf credential, signed URL, package URL, client address or request ID included |
+
+The first snapshot correctly reported sequence `1`, near-zero uptime and no
+previous delivery. Those startup values are defined behavior, not monitoring
+failure. Application version and commit are optional metadata and may remain
+`unknown` without affecting acceptance.
+
 ## Deferred and remaining gates
 
 - OQ-16 unattended reboot/session recovery: explicitly deferred.
@@ -135,5 +158,5 @@ must be protected independently.
 - OQ-19 Docker Desktop CPU, memory, disk, Resource Saver and update policy.
 - Observe cache retention and low-disk behavior during the pilot; the isolated
   target-Mac acceptance test passed.
-- Monitoring/alert ownership and certificate-renewal automation.
+- Power Automate alert routing/retention ownership and certificate-renewal automation.
 - Actual managed-client `HEAD`, resume and multi-range behavior under OQ-05.
