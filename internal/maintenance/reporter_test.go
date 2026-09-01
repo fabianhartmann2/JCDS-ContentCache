@@ -337,7 +337,7 @@ func TestAPIOnlySnapshotDoesNotRequireOrAttemptWebhook(t *testing.T) {
 			APIEnabled: true, WebhookEnabled: false, Interval: time.Minute, Timeout: time.Second,
 			InstanceName: "API-only cache", InstanceUUID: "2b1ab8d0-a064-47ca-af4e-366c53c43f10",
 			InventoryMode: "summary", InventoryMaxItems: 10,
-			TLSCertFile: writeCertificate(t, now.Add(60 * 24 * time.Hour)),
+			TLSCertFile:      writeCertificate(t, now.Add(60*24*time.Hour)),
 			TLSWarningBefore: 30 * 24 * time.Hour, TLSCriticalBefore: 14 * 24 * time.Hour,
 			HealthURL: health.URL,
 		},

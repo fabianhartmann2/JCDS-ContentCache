@@ -35,26 +35,26 @@ type MetricsConfig struct {
 	WebhookEnabled     bool
 	ConfigError        error
 	WebhookConfigError error
-	URL               *url.URL
-	Interval          time.Duration
-	Timeout           time.Duration
-	AllowedHosts      map[string]struct{}
-	AllowPrivateIPs   bool
-	AuthMode          string
-	HMACSecretFile    string
-	InstanceName      string
-	InstanceUUID      string
-	InstanceFQDN      string
-	InstanceVersion   string
-	InstanceCommit    string
-	IdentityPath      string
-	InventoryMode     string
-	InventoryMaxItems int
-	TLSCertFile       string
-	TLSWarningBefore  time.Duration
-	TLSCriticalBefore time.Duration
-	HealthURL         string
-	MaxAttempts       int
+	URL                *url.URL
+	Interval           time.Duration
+	Timeout            time.Duration
+	AllowedHosts       map[string]struct{}
+	AllowPrivateIPs    bool
+	AuthMode           string
+	HMACSecretFile     string
+	InstanceName       string
+	InstanceUUID       string
+	InstanceFQDN       string
+	InstanceVersion    string
+	InstanceCommit     string
+	IdentityPath       string
+	InventoryMode      string
+	InventoryMaxItems  int
+	TLSCertFile        string
+	TLSWarningBefore   time.Duration
+	TLSCriticalBefore  time.Duration
+	HealthURL          string
+	MaxAttempts        int
 }
 
 func loadMetricsConfig() (MetricsConfig, error) {
