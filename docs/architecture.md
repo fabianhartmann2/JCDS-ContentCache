@@ -41,7 +41,7 @@ representation backing that container path is a separate production decision.
 |---|---|
 | Dedicated Mac | Physical availability, macOS lifecycle, network, time, power and Docker Desktop startup |
 | Docker Desktop | Linux VM, Docker Engine, Compose, container networking, image storage and persistent-volume implementation |
-| NGINX | TLS termination, client method/path controls, local static delivery, miss routing and privacy-safe request telemetry |
+| NGINX | TLS termination, client method/path controls, local static delivery, miss routing and detailed restricted request telemetry |
 | Go helper | OAuth, Jamf catalog/resolver access, destination validation, one-transfer in-flight fan-out, SHA3-512/length verification and atomic publication |
 | Package-store volume | Immutable completed packages and hidden same-filesystem temporary downloads |
 | Cache maintainer | Restricted access index, capacity cleanup and the optional decoupled webhook snapshot reporter |

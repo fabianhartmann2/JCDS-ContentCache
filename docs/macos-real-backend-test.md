@@ -163,7 +163,7 @@ prefix immediately and then follow the same single JCDS transfer.
 
 The second request is served directly by NGINX and makes no Jamf or JCDS request.
 
-## 5. Inspect privacy-safe behavior records
+## 5. Inspect detailed request records
 
 ```bash
 docker compose \
@@ -172,7 +172,11 @@ docker compose \
   | sed -n 's/^[^{]*//p'
 ```
 
-The records should show one successful `JCDS` response followed by a `LOCAL` response. They exclude the package name, path, raw range, raw user agent, token, secret and signed URL.
+The records should show one successful `JCDS` response followed by a `LOCAL`
+response, including the package filename, observed client address and selected
+raw HTTP headers. They continue to exclude tokens, secrets, cookies, referrers,
+query strings and signed URLs. Do not paste these restricted records into a
+public channel.
 
 If the request fails, note the HTTP status and request ID first. Inspect helper logs only on the Mac and do not paste them into a public channel because they may contain the package filename:
 

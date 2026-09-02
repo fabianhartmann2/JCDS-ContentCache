@@ -423,9 +423,19 @@ Host and container egress should be restricted to the Jamf tenant, approved JCDS
 
 ### NFR-009 Auditability
 
-The standard NGINX client-behavior log must contain timestamp, source client address, coarse client class, request/correlation ID, connection identifiers, HTTP protocol, method, range class, If-Range presence, result status, package source (`LOCAL`, `JCDS` or `INFLIGHT`), response range/length presence, byte count, duration, upstream status/timing and request completion. It must not contain the URI, package name, query string, raw Range or User-Agent values, Authorization, cookies, referrer, client tokens, Jamf tokens, client secrets or signed URLs. Source addresses are client-identifying operational data and require restricted access and an approved retention period.
+The standard NGINX request log must contain timestamp, observed source client
+address, validated package filename, coarse client class, raw `User-Agent`,
+`Range` and `If-Range` values, request/correlation ID, connection identifiers,
+HTTP protocol, method, result status, package source (`LOCAL`, `JCDS` or
+`INFLIGHT`), raw `Content-Range` and `Content-Length` response values, byte
+count, duration, upstream status/timing and request completion. It must not
+contain query strings, Authorization, cookies, referrer, arbitrary unlisted
+headers, client tokens, Jamf tokens, client secrets, request/response bodies or
+signed URLs. Source addresses, package filenames and raw diagnostic headers are
+restricted operational data and require protected access and an approved
+retention period.
 
-> **Priority: Must. Acceptance:** Automated tests prove the behavior schema and representative GET, HEAD, start-at-zero, resumed, multi-range, local, upstream and error classifications; a disclosure check finds none of the excluded fields or values.
+> **Priority: Must. Acceptance:** Automated tests prove the request schema and representative GET, HEAD, start-at-zero, resumed, multi-range, local, upstream and error classifications; a disclosure check finds none of the excluded secret-bearing header values.
 
 ### NFR-010 Observability
 
@@ -613,7 +623,7 @@ Immutable filenames permit indefinite local reuse without HTTP freshness expiry 
 
 ### 13.3 Monitoring and alerting
 
-The baseline NGINX behavior-log schema and privacy boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata, but it must not reintroduce the excluded URI, package identity, raw headers, credentials or signed URLs.
+The baseline NGINX request-log schema and disclosure boundary are defined in `docs/client-request-monitoring.md`. Production collection may enrich records with deployment metadata. It must protect filename, client-address and selected raw-header data and must never add credentials, cookies, referrers, query strings, bodies or signed URLs.
 
 The implemented monitoring integration is a periodic snapshot collector inside
 the existing cache-maintainer. Independent, default-disabled consumers expose

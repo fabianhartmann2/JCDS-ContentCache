@@ -179,6 +179,10 @@ compose restart cache-helper nginx
 wait_until_ready
 
 curl --fail --silent --show-error \
+  --header 'Authorization: Bearer DO_NOT_LOG_AUTH_MARKER' \
+  --header 'If-Range: diagnostic-if-range' \
+  --cookie 'DO_NOT_LOG_COOKIE_MARKER=1' \
+  --referer 'https://example.invalid/DO_NOT_LOG_REFERER_MARKER' \
   --dump-header "${temporary_directory}/restart.headers" \
   --output "${temporary_directory}/restart.pkg" \
   http://127.0.0.1:8443/packages/ExampleFile.pkg
@@ -215,15 +219,12 @@ log_path = sys.argv[1]
 raw_log = open(log_path, encoding="utf-8").read()
 
 for forbidden in (
-    "ExampleFile.pkg",
-    "Missing.pkg",
-    "/packages/",
-    "/Packages/",
-    "bytes=",
-    "curl/",
+    "DO_NOT_LOG_AUTH_MARKER",
+    "DO_NOT_LOG_COOKIE_MARKER",
+    "DO_NOT_LOG_REFERER_MARKER",
 ):
     if forbidden in raw_log:
-        raise SystemExit(f"sensitive request detail leaked into NGINX log: {forbidden!r}")
+        raise SystemExit(f"sensitive request header leaked into NGINX log: {forbidden!r}")
 
 records = []
 marker = '{"event":"package_request"'
@@ -240,18 +241,24 @@ expected_keys = {
     "event",
     "timestamp",
     "client",
+    "filename",
     "client_kind",
+    "user_agent",
     "request_id",
     "connection",
     "connection_requests",
     "http_protocol",
     "method",
     "range_kind",
+    "range",
     "if_range",
+    "if_range_value",
     "status",
     "source",
     "response_range",
+    "response_content_range",
     "response_length",
+    "response_content_length",
     "bytes_sent",
     "request_seconds",
     "upstream_status",
@@ -266,8 +273,12 @@ for record in records:
         raise SystemExit(f"unexpected event: {record!r}")
     if record["client_kind"] != "curl":
         raise SystemExit(f"unexpected sanitized client class: {record!r}")
+    if not record["user_agent"].startswith("curl/"):
+        raise SystemExit(f"missing raw User-Agent header: {record!r}")
     if not record["client"]:
         raise SystemExit(f"missing client correlation address: {record!r}")
+    if record["filename"] not in {"ExampleFile.pkg", "Missing.pkg"}:
+        raise SystemExit(f"missing clear-text package filename: {record!r}")
     if not re.fullmatch(r"[0-9a-f]{32}", record["request_id"]):
         raise SystemExit(f"invalid request ID: {record!r}")
 
@@ -277,14 +288,19 @@ def require_record(**expected):
             return
     raise SystemExit(f"missing behavior record {expected!r}; records={records!r}")
 
-require_record(method="GET", range_kind="none", status=200, source="JCDS", completion="complete")
-require_record(method="GET", range_kind="none", status=200, source="INFLIGHT", completion="complete")
-require_record(method="GET", range_kind="none", status=200, source="LOCAL", completion="complete")
+require_record(filename="ExampleFile.pkg", method="GET", range_kind="none", status=200, source="JCDS", completion="complete")
+require_record(filename="ExampleFile.pkg", method="GET", range_kind="none", status=200, source="INFLIGHT", completion="complete")
+require_record(filename="ExampleFile.pkg", method="GET", range_kind="none", status=200, source="LOCAL", completion="complete")
 require_record(method="HEAD", range_kind="none", status=200, source="LOCAL", completion="complete")
-require_record(method="GET", range_kind="start_zero", status=206, source="LOCAL", response_range="present")
-require_record(method="GET", range_kind="resume", status=206, source="LOCAL", response_range="present")
-require_record(method="GET", range_kind="multi", status=206, source="LOCAL", response_range="absent")
-require_record(method="GET", range_kind="none", status=502, source="", completion="complete")
+require_record(method="GET", range_kind="none", if_range="present", if_range_value="diagnostic-if-range", status=200, source="LOCAL")
+require_record(method="GET", range_kind="start_zero", range="bytes=0-0", status=206, source="LOCAL", response_range="present", response_content_length="1")
+require_record(method="GET", range_kind="resume", range="bytes=5-9", status=206, source="LOCAL", response_range="present", response_content_length="5")
+require_record(method="GET", range_kind="multi", range="bytes=0-0,5-5", status=206, source="LOCAL", response_range="absent")
+require_record(filename="Missing.pkg", method="GET", range_kind="none", status=502, source="", completion="complete")
+
+for record in records:
+    if record["range_kind"] in {"start_zero", "resume"} and not record["response_content_range"].startswith("bytes "):
+        raise SystemExit(f"missing raw Content-Range response header: {record!r}")
 PY
 
-echo "Compose smoke test passed: one upstream fill with live INFLIGHT fan-out, local range/restart persistence, outage behavior, and privacy-safe NGINX monitoring."
+echo "Compose smoke test passed: one upstream fill with live INFLIGHT fan-out, local range/restart persistence, outage behavior, and detailed NGINX request monitoring."

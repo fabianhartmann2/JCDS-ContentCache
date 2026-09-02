@@ -131,7 +131,8 @@ uses a local access index.
 
 Implemented design:
 
-- retain the privacy-safe standard NGINX log on stdout without package names;
+- retain the detailed NGINX request log on stdout with package names, the
+  observed client address and an explicit allowlist of diagnostic headers;
 - send successful `200` and `206` package-access events over internal UDP
   syslog to the `cache-maintainer` service;
 - store canonical filename and last-access time in a mode-`0600` index in a

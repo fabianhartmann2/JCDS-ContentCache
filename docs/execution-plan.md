@@ -113,7 +113,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Add Dockerfiles and a local Docker Compose stack.
 - [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
 - [x] Add structured logs with automatic sensitive-field exclusion.
-- [x] Add privacy-safe NGINX client-behavior records for method, range class, response source/status, bytes, timing and completion, with request IDs and automated disclosure tests.
+- [x] Add structured NGINX request records for method, filename, observed client address, selected headers, range class, response source/status, bytes, timing and completion, with request IDs and automated secret-exclusion tests.
 - [x] Add basic liveness and readiness endpoints.
 - [x] Verify catalog length and SHA3-512 before atomic publication.
 
@@ -177,7 +177,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Define packages as rebuildable data and pass an isolated destructive empty-volume recovery exercise on the target Mac.
 - [x] Run real-tenant miss, local-hit, range, restart, helper-outage, concurrent-follower and recovery tests with private package identity.
 - [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
-- [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with privacy-safe monitoring.
+- [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with structured request monitoring.
 - [x] Implement a separate TLS-enabled `deploy/macos-production/` candidate; do not expose the localhost test profile.
 - [ ] Prove unattended Docker Desktop and Compose recovery after Mac reboot and managed updates.
 - [ ] Validate the selected named-volume or APFS storage model at production capacity.
@@ -331,7 +331,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 ## 10. Immediate next actions
 
 1. Record the service-owner Docker Desktop resource and update settings.
-2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from privacy-safe NGINX records to resolve OQ-05.
+2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from restricted NGINX request records to resolve OQ-05.
 3. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
 4. Select the webhook receiver/authentication/alert owner, implement `docs/webhook-monitoring.md`, and establish certificate-renewal automation.
 5. Install the implemented LaunchAgent controller and complete the OQ-16 unattended reboot/session recovery test before final production approval.

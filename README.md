@@ -33,7 +33,7 @@ Milestone M1 demonstrates the complete local lifecycle without credentials:
 11. A range request on a miss retrieves the complete object; local hits support normal `206 Partial Content` delivery.
 12. Local packages remain available during a simulated Jamf/JCDS outage, while a missing package receives a controlled `502` response.
 13. OAuth, Jamf API, redirect, and object failures are categorized without returning dependency bodies or logging complete request URLs.
-14. NGINX emits privacy-safe JSON behavior records for package requests without logging package names, paths, query strings, raw `Range` values, or raw user agents.
+14. NGINX emits detailed JSON request records with the observed client address, package filename and selected raw HTTP headers while continuing to exclude credentials, cookies, referrers, query strings and upstream URLs.
 
 The confirmed v1 contract accepts exactly one flat filename segment ending in lowercase `.pkg`. Nested paths and additional file types are deliberately outside the first release. Initial sizing targets 500–2,000 managed Macs, an approximately 500–600 GB package working set on the 1 TB Mac and at least 30 percent package-store free space.
 
@@ -108,9 +108,9 @@ See [Production architecture](docs/architecture.md) for confirmed boundaries and
 
 ## Client request monitoring
 
-NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record distinguishes `GET` and `HEAD`, full and range requests, local hits, upstream fills and shared in-flight followers, response status, transferred bytes, timing, completion, and a coarse client class. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
+NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record includes the package filename, container-observed client address, raw `User-Agent`, `Range` and `If-Range` request headers, raw `Content-Range` and `Content-Length` response headers, request classifications, cache source, status, bytes, timing and completion. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
 
-The standard behavior log intentionally excludes the URI, package name, query string, raw `Range`, raw `User-Agent`, authorization, cookies, and referrer. The observed network address remains present, but Docker Desktop production traffic shows its gateway address rather than the original client; per-client attribution is unavailable at this layer.
+The log intentionally excludes query strings, authorization, cookies, referrer, Jamf credentials, tokens, signed URLs and bodies. Treat the log as restricted operational data because filenames, addresses and selected headers can identify clients and installed software. Docker Desktop production traffic may show its gateway address rather than the original client; NGINX cannot reconstruct an address removed by Docker Desktop's port forwarding.
 
 Inspect development records with:
 
@@ -120,7 +120,7 @@ docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
   | jq -c 'select(.event == "package_request")'
 ```
 
-See [Client request monitoring](docs/client-request-monitoring.md) for the schema, privacy boundary, request classifications, example analyses, proxy caveats, and production guidance.
+See [Client request monitoring](docs/client-request-monitoring.md) for the schema, disclosure boundary, request classifications, example analyses, proxy caveats, and production guidance.
 
 The optional monitoring integration lets the existing cache-maintainer create
 a periodic privacy-bounded service snapshot. Independently enabled consumers
@@ -200,7 +200,7 @@ docs/                   Architecture, requirements, execution plan and contract 
 - Every resolved URL and redirect is checked against the configured hostname allowlist.
 - In production mode, every allowed download hostname is resolved before use and the request is rejected if any returned address is private, loopback or link-local.
 - Dependency response bodies and complete request URLs are excluded from propagated errors so temporary signed queries cannot enter normal logs.
-- NGINX behavior logs omit package identity and raw request headers; standard per-request error logging is suppressed because NGINX error messages can contain the raw request line.
+- NGINX request logs expose package identity and a strict allowlist of diagnostic headers, but omit credentials, cookies, referrers, query strings and upstream URLs; standard per-request error logging is suppressed because NGINX error messages can contain the raw request line.
 - Jamf catalog length and SHA3-512 metadata are verified before a downloaded file is published.
 - MD5 is parsed for interoperability but is not used as the security integrity boundary.
 - NGINX receives read-only access to completed package storage; the helper owns publication.

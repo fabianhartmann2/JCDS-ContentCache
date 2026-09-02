@@ -351,8 +351,10 @@ Production monitoring must cover:
 - cache-maintainer health, cleanup summaries and restricted deletion audit;
 - macOS reboot/update and Docker Desktop update outcomes.
 
-NGINX behavior records must retain the existing privacy boundary: no package
-name, URI, query, raw range, raw user agent, credentials or signed URL.
+NGINX request records contain the package filename, the container-observed
+client address and selected raw range/user-agent metadata. Restrict access and
+retention accordingly. They must still exclude query strings, credentials,
+cookies, referrers, request bodies and signed upstream URLs.
 
 The implemented optional monitoring integration extends the existing
 cache-maintainer with one periodic snapshot collector. Independent consumers
