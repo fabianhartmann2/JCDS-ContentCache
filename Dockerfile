@@ -1,24 +1,33 @@
-FROM golang:1.24-alpine AS build
+# syntax=docker/dockerfile:1
 
+FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cache-helper ./cmd/cache-helper \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cache-maintainer ./cmd/cache-maintainer \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mock-upstream ./cmd/mock-upstream
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -ldflags="-s -w" \
-    -o /out/cache-helper \
-    ./cmd/cache-helper
-
-FROM alpine:3.21
-
+FROM alpine:3.21 AS runtime-base
 RUN apk add --no-cache ca-certificates \
-    && addgroup -S -g 10001 cache \
-    && adduser -S -D -H -u 10001 -G cache cache
+    && addgroup -g 65532 -S cache \
+    && adduser -u 65532 -S -D -H -G cache cache
 
+FROM runtime-base AS mock-upstream
+COPY --from=build /out/mock-upstream /usr/local/bin/mock-upstream
+USER 65532:65532
+EXPOSE 8081
+ENTRYPOINT ["/usr/local/bin/mock-upstream"]
+
+FROM runtime-base AS cache-helper
 COPY --from=build /out/cache-helper /usr/local/bin/cache-helper
-
-USER 10001:10001
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/cache-helper"]
+
+FROM runtime-base AS cache-maintainer
+COPY --from=build /out/cache-maintainer /usr/local/bin/cache-maintainer
+USER 65532:65532
+EXPOSE 5514/udp 8082
+ENTRYPOINT ["/usr/local/bin/cache-maintainer"]

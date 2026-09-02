@@ -1,0 +1,93 @@
+name: jcds-content-cache
+
+services:
+  store-init:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary
+        chown -R 65532:65532 /srv/jamf-store
+        chmod 0755 /srv/jamf-store /srv/jamf-store/packages
+        chmod 0700 /srv/jamf-store/.temporary
+    volumes:
+      - package-store:/srv/jamf-store
+    restart: "no"
+
+  mock-upstream:
+    build:
+      context: ../..
+      target: mock-upstream
+    environment:
+      MOCK_LISTEN_ADDR: :8081
+      MOCK_PUBLIC_BASE_URL: http://mock-upstream:8081
+      MOCK_FIXTURE_ROOT: /fixtures
+      MOCK_CLIENT_ID: mock-client
+      MOCK_CLIENT_SECRET: mock-secret
+      MOCK_CHUNK_DELAY: 150ms
+      MOCK_CHUNK_SIZE: "32"
+    read_only: true
+    volumes:
+      - ../../testdata/packages:/fixtures:ro
+    tmpfs:
+      - /tmp
+
+  cache-helper:
+    build:
+      context: ../..
+      target: cache-helper
+    depends_on:
+      store-init:
+        condition: service_completed_successfully
+      mock-upstream:
+        condition: service_started
+    environment:
+      LISTEN_ADDR: :8080
+      STORE_ROOT: /srv/jamf-store/packages
+      TEMP_ROOT: /srv/jamf-store/.temporary
+      JAMF_TOKEN_URL: http://mock-upstream:8081/api/v1/oauth/token
+      JAMF_CLIENT_ID: mock-client
+      JAMF_CLIENT_SECRET: mock-secret
+      JAMF_CATALOG_URL: http://mock-upstream:8081/api/v1/jcds/files
+      JAMF_RESOLVER_URL_TEMPLATE: http://mock-upstream:8081/api/v1/jcds/files/{filename}
+      JAMF_DOWNLOAD_URL_FIELD: uri
+      JCDS_ALLOWED_HOSTS: mock-upstream
+      JCDS_ALLOW_HTTP: "true"
+      TOKEN_EXPIRY_SKEW: 30s
+      FILL_TIMEOUT: 10m
+      SHUTDOWN_TIMEOUT: 30s
+      MAX_PACKAGE_BYTES: "1073741824"
+      MIN_FREE_BYTES: "0"
+      MIN_FREE_PERCENT: "0"
+      TEMP_FILE_MAX_AGE: 1h
+    read_only: true
+    volumes:
+      - package-store:/srv/jamf-store
+    tmpfs:
+      - /tmp
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    depends_on:
+      cache-helper:
+        condition: service_started
+    ports:
+      - "8443:8080"
+    read_only: true
+    volumes:
+      - ../nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - package-store:/srv/jamf-store:ro
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+
+volumes:
+  package-store:

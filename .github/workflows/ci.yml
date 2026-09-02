@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
   pull_request:
 
 permissions:
@@ -12,23 +12,76 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.24.x"
           cache: true
-
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
-
+      - name: Check formatting
+        run: |
+          gofmt -w .
+          git diff --exit-code
+      - name: Test
+        run: go test -race ./...
       - name: Vet
         run: go vet ./...
-
-      - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
-
-      - name: Build
-        run: go build ./cmd/cache-helper
+      - name: Build binaries
+        run: go build ./cmd/cache-helper ./cmd/cache-maintainer ./cmd/mock-upstream ./cmd/contract-capture
+      - name: Build container image
+        run: docker build --tag jcds-content-cache:ci .
+      - name: Validate Docker capture workflow
+        env:
+          JAMF_TOKEN_URL: https://tenant.example/api/v1/oauth/token
+          JAMF_CLIENT_ID: synthetic-client
+          JAMF_CLIENT_SECRET: synthetic-secret
+          JAMF_CATALOG_URL: https://tenant.example/api/v1/jcds/files
+          JAMF_RESOLVER_URL_TEMPLATE: https://tenant.example/api/v1/jcds/files/{filename}
+          CAPTURE_PACKAGE_NAME: Synthetic.pkg
+        run: |
+          bash -n scripts/capture-live-contracts.sh
+          docker compose --file deploy/contract-capture/compose.yaml config --quiet
+          docker build --file deploy/contract-capture/Dockerfile --tag jcds-contract-capture:ci .
+          docker run --rm jcds-contract-capture:ci /bin/sh -c 'test -s /etc/ssl/certs/ca-certificates.crt'
+          capture_ca="$(mktemp)"
+          printf '%s\n' '-----BEGIN CERTIFICATE-----' 'synthetic-ca-marker' '-----END CERTIFICATE-----' >"${capture_ca}"
+          chmod 0444 "${capture_ca}"
+          docker run --rm \
+            --env CAPTURE_CA_CERT_FILE=/run/secrets/enterprise-ca.pem \
+            --volume "${capture_ca}:/run/secrets/enterprise-ca.pem:ro" \
+            jcds-contract-capture:ci \
+            /bin/sh -c 'test "${SSL_CERT_FILE}" = /tmp/capture-ca-bundle.pem && grep -q -- synthetic-ca-marker "${SSL_CERT_FILE}"'
+          rm -f -- "${capture_ca}"
+      - name: Validate production deployment configuration
+        run: |
+          bash -n scripts/check-certificate-expiry.sh
+          bash -n tests/integration/production_config_smoke.sh
+          tests/integration/production_config_smoke.sh
+      - name: Validate macOS real-backend profile
+        env:
+          JCDS_MAC_HELPER_ENV_FILE: ${{ github.workspace }}/deploy/macos/cache-helper.real.env.example
+        run: |
+          docker compose --file deploy/macos/compose.yaml config --quiet
+          docker compose --file deploy/macos/compose.yaml build nginx
+          docker compose --file deploy/macos/compose.yaml run --rm --no-deps store-init
+          docker compose --file deploy/macos/compose.yaml run --rm --no-deps \
+            --entrypoint /bin/sh cache-helper -eu -c \
+            'test "$(id -u)" -eq 0; temporary=/srv/jamf-store/.temporary/ci-write; final=/srv/jamf-store/packages/ci-write; : >"${temporary}"; mv "${temporary}" "${final}"; rm "${final}"'
+          docker compose --file deploy/macos/compose.yaml down --volumes --remove-orphans
+          docker run --rm \
+            --read-only \
+            --add-host cache-helper:127.0.0.1 \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=64m \
+            --tmpfs /var/run:rw,noexec,nosuid,size=8m \
+            --entrypoint nginx \
+            jcds-content-cache-nginx:macos-real-test \
+            -t
+      - name: Validate macOS production profile
+        run: |
+          bash -n tests/integration/macos_production_config_smoke.sh
+          bash -n scripts/macos-startup-controller.sh
+          bash -n scripts/manage-macos-launchagent.sh
+          bash -n tests/integration/macos_startup_controller_test.sh
+          tests/integration/macos_startup_controller_test.sh
+          tests/integration/macos_production_config_smoke.sh
+      - name: Docker Compose smoke test
+        run: tests/integration/compose_smoke.sh

@@ -1,10 +1,14 @@
 # Jamf JCDS Package Cache — Project Execution Plan
 
-**Status:** Active working plan  
-**Version:** 0.2  
-**Date:** 27 August 2026  
-**Owner:** Mac Workplace  
-**Target:** Production service on one managed Linux container host
+**Status:** Active working plan
+
+**Version:** 0.8
+
+**Date:** 1 September 2026
+
+**Owner:** Mac Workplace
+
+**Target:** Production service on one dedicated Mac running Docker Desktop
 
 ## 1. Purpose and working agreement
 
@@ -23,22 +27,32 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 |---|---|
 | Delivery target | Production service |
 | Package identity | Filenames are immutable; one filename always identifies the same bytes |
-| Deployment | NGINX and a Go helper run as containers on one Linux host |
-| Client namespace | `https://<server>:8443/packages/<filename>.pkg` |
+| Deployment | NGINX and a Go helper run as containers through Docker Desktop on one dedicated Mac |
+| Client namespace | Jamf-compatible `/Packages/<filename>.pkg`; lowercase `/packages/` compatibility alias |
+| V1 path scope | Exactly one flat filename segment ending in lowercase `.pkg`; no nested paths or additional file types |
+| Initial client population | 500–2,000 managed Macs |
+| Initial package working set | Approximately 500–600 GB, retaining at least 30% package-store free space |
+| Host baseline | Dedicated wired Mac mini with 24 GB RAM and 1 TB APFS storage |
+| Service endpoint | `https://jcds-cache.appfruit.ch:8443` |
+| Client access | Server-authenticated TLS with no source-CIDR filtering or client authentication; any route-reachable client may request packages |
+| Package-store mount | Docker named volume at `/srv/jamf-store`; macOS administrative visibility, permissions, restart persistence and empty-volume recovery validated; final capacity/reboot/update qualification pending |
+| DNS and certificate | Manual DNS records and an initial certificate obtained through manual DNS validation; unattended renewal remains a production gate |
+| Secret delivery | Root-owned host environment file, mode `0600`, passed to the helper by Docker Compose |
+| Outbound network | Direct HTTPS; no proxy or TLS inspection |
 | Local storage | URL-derived, filename-preserving files below `/srv/jamf-store/packages/` |
 | Local hit | NGINX serves the completed file directly |
 | Store miss | NGINX routes internally to the helper |
 | Upstream access | OAuth 2.0 client credentials, followed by the Jamf file-resolution API and temporary JCDS URL |
 | First requester | Receives a streamed response while the store is being filled |
 | Publication | Download into hidden same-filesystem temporary storage; validate; atomically rename |
-| Concurrency | One upstream transfer per canonical package while concurrent callers wait or share the coordinated result |
+| Concurrency | One upstream transfer per canonical package; full GET followers live-stream the growing private file while Range followers wait for publication |
 | Cache model | Do not use NGINX's opaque hashed `proxy_cache` as the authoritative store |
 | Repository | Public GitHub repository [`fabianhartmann2/JCDS-ContentCache`](https://github.com/fabianhartmann2/JCDS-ContentCache) |
 
 ## 3. Implementation principles
 
 1. Build a thin end-to-end slice before adding production hardening.
-2. Keep Jamf-specific behavior behind an adapter interface because the referenced endpoint is deprecated.
+2. Use the selected deprecated JCDS endpoints until Jamf introduces replacements, and keep Jamf-specific behavior behind adapter interfaces so migration does not alter client URLs.
 3. Treat the filesystem as a publication boundary: clients may only see complete final files.
 4. Normalize and validate a package name before any filesystem lookup or upstream request.
 5. Stream bytes; never buffer a complete package in memory.
@@ -53,17 +67,22 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 **Goal:** Remove external unknowns that could invalidate the helper or NGINX design.
 
 - [ ] Create a dedicated read-only Jamf API client for development.
-- [ ] Confirm the supported file-resolution endpoint in the target tenant's `/api/doc`.
-- [ ] Capture a redacted successful file-resolution JSON response.
-- [ ] Capture redacted not-found, unauthorized, rate-limit and server-error responses.
-- [ ] Record the precise field containing the temporary download URL.
-- [ ] Record OAuth token response fields, expiry behavior and relevant error responses.
+- [x] Record the decision to use deprecated `GET /api/v1/jcds/files/{fileName}` until Jamf introduces a replacement.
+- [x] Capture a redacted successful file-resolution JSON response.
+- [x] Capture the redacted resolver not-found status and JSON shape.
+- [ ] Capture redacted unauthorized, rate-limit and server-error responses.
+- [x] Record the precise field containing the temporary download URL (`uri`).
+- [x] Capture sanitized JCDS file-list metadata fields: `fileName`, `length`, `md5`, `region`, and `sha3`.
+- [x] Confirm that the complete file-list response is a top-level JSON array without a pagination envelope.
+- [x] Record OAuth token success fields and observed expiry behavior; relevant error responses remain open.
 - [ ] Identify approved JCDS hostnames and every permitted redirect destination.
-- [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, checksums and range support.
+- [x] Establish JCDS catalog `length` and SHA3-512 as the publication-integrity source of truth.
+- [ ] Determine whether object responses expose `Content-Length`, `ETag`, `Last-Modified`, and range support.
 - [ ] Capture representative Mac client requests for `GET`, `HEAD`, single-range resume and any multi-range behavior.
-- [ ] Confirm whether the first store-miss request will always fetch a complete object even when the client requests a range.
-- [ ] Confirm the v1 path model: one filename segment ending in `.pkg`, or nested subdirectories.
-- [ ] Record findings in `docs/external-contracts.md`; include only sanitized examples.
+- [x] Implement and test the provisional rule that a store miss always fetches a complete object even when the client requests a range.
+- [x] Confirm the v1 path model as one filename segment ending in lowercase `.pkg`, without nested subdirectories or additional file types.
+- [x] Record current findings in `docs/external-contracts.md`; include only sanitized examples.
+- [x] Add a Dockerized contract-capture workflow that emits only schema types, expiry seconds, aggregate package sizing, metadata-presence checks, digest lengths, hostname fingerprints, redirect counts, and safe HEAD/range capability observations; support a read-only, user-supplied PEM CA bundle for TLS-inspecting networks.
 
 **Exit criteria**
 
@@ -79,47 +98,55 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 - [x] Initialize the Go module and service entry point.
 - [x] Add strict configuration parsing and startup validation.
 - [x] Implement canonical package-name validation.
-- [ ] Implement an in-memory OAuth token provider with an expiry safety margin.
-- [ ] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
-- [ ] Define a replaceable Jamf file-resolver interface.
-- [ ] Validate resolved URLs against HTTPS, hostname and redirect policy.
-- [ ] Implement streaming object download without whole-file memory buffering.
-- [ ] Implement same-filesystem temporary files and atomic publication.
-- [ ] Implement per-package single-flight coordination.
-- [ ] Decide and test whether an upstream fill continues after the initiating client disconnects.
+- [x] Implement an in-memory OAuth token provider with an expiry safety margin.
+- [x] Retry one Jamf API request after a `401` by invalidating and refreshing the token.
+- [x] Define a replaceable Jamf file-resolver interface.
+- [x] Add a replaceable JCDS metadata-catalog interface and strict response validation.
+- [x] Validate resolved URLs against HTTPS, hostname and redirect policy.
+- [x] Implement streaming object download without whole-file memory buffering.
+- [x] Implement same-filesystem temporary files and atomic publication.
+- [x] Implement per-package single-flight coordination.
+- [x] Add live in-flight fan-out so concurrent full GET followers receive existing and future bytes from the one active JCDS transfer.
+- [x] Keep concurrent Range requests behind the publication gate and serve them as local 206 responses after verification.
+- [x] Continue a bounded upstream fill after the initiating client disconnects, and test successful subsequent local delivery.
 - [x] Configure NGINX `try_files` for local hits and an internal helper route for misses.
 - [x] Add Dockerfiles and a local Docker Compose stack.
-- [ ] Add mock OAuth, Jamf resolver and object-download services for integration tests.
-- [ ] Add structured logs with automatic sensitive-field exclusion.
+- [x] Add mock OAuth, Jamf resolver and object-download services for integration tests.
+- [x] Add structured logs with automatic sensitive-field exclusion.
+- [x] Add structured NGINX request records for method, filename, observed client address, selected headers, range class, response source/status, bytes, timing and completion, with request IDs and automated secret-exclusion tests.
 - [x] Add basic liveness and readiness endpoints.
+- [x] Verify catalog length and SHA3-512 before atomic publication.
 
 **Milestone M1 acceptance evidence**
 
-- [ ] The first request starts receiving bytes before the complete object reaches the cache host.
-- [ ] A completed download appears at the deterministic final path and matches the source bytes.
-- [ ] The second request is served locally without OAuth, Jamf API or object-download calls.
-- [ ] Concurrent misses for one package cause one upstream object transfer.
-- [ ] An interrupted or corrupt transfer never appears at the final public path.
-- [ ] A client abort behaves according to the recorded policy.
-- [ ] Restarting the containers preserves and serves completed packages.
+- [x] The first request starts receiving bytes before the complete object reaches the cache host.
+- [x] A completed download appears at the deterministic final path and matches the source bytes.
+- [x] The second request is served locally without OAuth, Jamf API or object-download calls.
+- [x] Concurrent misses for one package cause one upstream object transfer.
+- [x] A full GET follower receives bytes before publication with `X-Package-Source: INFLIGHT` and matches the leader byte-for-byte.
+- [x] A concurrent Range follower waits for publication and then receives `206 LOCAL` without another upstream transfer.
+- [x] An interrupted or corrupt transfer never appears at the final public path.
+- [x] A client abort behaves according to the recorded policy.
+- [x] Restarting the containers preserves and serves completed packages.
 
 ### Phase 2 — Security and failure handling
 
 **Goal:** Make the vertical slice safe and predictable under hostile input and dependency failures.
 
-- [ ] Enforce method, path length, character and extension restrictions.
-- [ ] Reject traversal, encoded traversal, ambiguous encoding, absolute URLs, query-based destinations and symlink escapes.
-- [ ] Apply inbound network controls and the selected client-authentication policy.
-- [ ] Apply outbound DNS, host, port and redirect restrictions.
-- [ ] Deliver the Jamf client secret through the selected secret platform.
-- [ ] Ensure secrets, tokens and signed URLs are redacted from logs, metrics, traces and error responses.
-- [ ] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
-- [ ] Add bounded connect, header, read, idle and total-operation timeouts.
+- [x] Enforce method, path length, character and extension restrictions for the confirmed flat lowercase `.pkg` namespace.
+- [x] Reject traversal, encoded traversal, ambiguous encoding, absolute URLs, query-based destinations and symlink escapes.
+- [x] Add production-candidate NGINX TLS controls; remove source-CIDR filtering after Docker Desktop source masking was proven and unrestricted route-level access was explicitly accepted.
+- [x] Apply exact-host, HTTPS-only, DNS-address and per-redirect restrictions in the helper; the final runtime hostname inventory remains open.
+- [x] Define root-owned host environment-file delivery for the Jamf secret without placing credentials in images, Compose YAML or Git.
+- [x] Ensure secrets, tokens and signed URLs are redacted from normal logs and error responses, with automated disclosure-focused tests.
+- [x] Sanitize dependency response bodies and complete request URLs before errors reach client responses or normal logs.
+- [x] Add explicit downstream error mapping for validation, not found, authentication, throttling, timeout and upstream failure cases.
+- [x] Add bounded connect, TLS-handshake, response-header, idle, fill and shutdown timeouts.
 - [ ] Add bounded retries with backoff only for safe transient operations.
-- [ ] Add maximum object size and minimum-free-space protections.
-- [ ] Add temporary-file cleanup after failure, restart and age threshold.
-- [ ] Define checksum or signature validation policy and implement available metadata checks.
-- [ ] Add non-root containers, read-only root filesystems where practical and minimal Linux capabilities.
+- [x] Add maximum object size and minimum-free-space protections.
+- [x] Add startup cleanup for stale regular `.part` files after the configured age threshold.
+- [x] Require Jamf catalog length and SHA3-512 validation before publishing a downloaded package; retain MD5 for interoperability only.
+- [x] Add non-root helper/mock images plus production read-only root filesystems, capability dropping, PID/memory bounds and unprivileged internal networking.
 - [ ] Add dependency, image and source scanning to CI.
 
 **Exit criteria**
@@ -132,14 +159,28 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 **Goal:** Deploy a controlled production candidate using real enterprise services.
 
-- [ ] Provision the Linux host, persistent volume, DNS, firewall and egress rules.
-- [ ] Issue and automatically renew the service certificate.
-- [ ] Provision the least-privilege Jamf API client in the enterprise secret store.
-- [ ] Configure capacity thresholds, retention and administrative cleanup procedures.
-- [ ] Connect logs, metrics and alerts to the selected monitoring platform.
-- [ ] Create operational dashboards for requests, local hits, fills, failures, latency, OAuth health, active downloads and disk state.
-- [ ] Add backup/rebuild expectations and a tested disaster-recovery procedure.
-- [ ] Run a real-tenant smoke test with approved non-sensitive packages.
+- [x] Provision the dedicated Mac, Docker Desktop, persistent storage and DNS; no inbound source filter is required by the accepted design.
+- [x] Add a host-specific Compose definition, NGINX TLS configuration, environment templates, certificate check and deployment/rollback runbook.
+- [x] Issue and install the initial enterprise-trusted certificate; establish an automated renewal method before final production approval.
+- [x] Provision the Jamf API client and install its secret in the protected mode-`0600` host environment file.
+- [x] Implement configurable capacity thresholds, a restricted last-access index and conditional cleanup with 90-day/30%/35% defaults.
+- [x] Exercise cleanup with an isolated forced-threshold Docker-volume test and record operator acceptance evidence.
+- [x] Implement the approved cache-maintainer HTTPS webhook reporter, stable identity, configurable interval and versioned privacy-bounded snapshot.
+- [x] Decouple snapshot collection from webhook delivery and add a default-disabled, unauthenticated `/health/metrics` consumer that works in API-only mode.
+- [x] Report the mounted public TLS certificate's expiry and configurable warning/critical state without mounting its private key; retain external served-certificate validation.
+- [x] Add exact receiver-host validation, redirect rejection, bounded in-memory retry and HMAC authentication.
+- [x] Connect webhook snapshots to the approved Power Automate HTTPS receiver and validate target-Mac delivery.
+- [ ] Validate API-only, API-plus-webhook and disabled `/health/metrics` behavior on the target Mac.
+- [ ] Decide whether and where sanitized NGINX behavior logs are collected centrally.
+- [ ] Create operational dashboards and alerts for readiness, snapshot freshness, requests, local hits, fills, failures, latency, active downloads, cleanup and disk state.
+- [ ] Retain an external HTTPS probe because an in-container snapshot cannot prove managed-client reachability or macOS/Docker Desktop health.
+- [x] Define packages as rebuildable data and pass an isolated destructive empty-volume recovery exercise on the target Mac.
+- [x] Run real-tenant miss, local-hit, range, restart, helper-outage, concurrent-follower and recovery tests with private package identity.
+- [x] Add a localhost-only Docker Desktop profile and credential-safe runbook for the controlled real-tenant smoke test on macOS.
+- [x] Validate a real Jamf/JCDS store miss followed by a byte-identical local hit on Docker Desktop, with structured request monitoring.
+- [x] Implement a separate TLS-enabled `deploy/macos-production/` candidate; do not expose the localhost test profile.
+- [ ] Prove unattended Docker Desktop and Compose recovery after Mac reboot and managed updates.
+- [ ] Validate the selected named-volume or APFS storage model at production capacity.
 - [ ] Measure throughput, time to first byte, CPU, memory, disk I/O and WAN usage.
 - [ ] Tune timeouts and concurrency using measured package sizes and client demand.
 - [ ] Complete security, infrastructure and service-owner reviews.
@@ -156,7 +197,7 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 - [ ] Execute all acceptance tests from the requirements specification.
 - [ ] Record evidence for every production acceptance gate.
-- [ ] Test local-hit service during a simulated Jamf/JCDS outage.
+- [x] Test local-hit service during a simulated Jamf/JCDS outage.
 - [ ] Test disk-low, disk-full, token expiry, redirect rejection, upstream timeout and process-restart scenarios.
 - [ ] Pilot with a small managed-client group.
 - [ ] Compare client success, latency, bandwidth savings and error rates against the baseline.
@@ -173,35 +214,51 @@ This file is the implementation sequence for the Jamf JCDS filesystem-backed pac
 
 ## 5. Open-question register
 
-Status values are `OPEN`, `IN REVIEW` or `RESOLVED`. Blocking questions must be resolved before the affected implementation or production gate.
+Status values are `OPEN`, `DESIGN APPROVED; IMPLEMENTATION PENDING`, `IN REVIEW`
+or `RESOLVED`. Blocking questions must be resolved before the affected
+implementation or production gate.
 
 | ID | Decision | Priority | Current status | Recommended starting position | Evidence needed |
 |---|---|---:|---|---|---|
-| OQ-01 | Exact supported Jamf file-resolution API contract | Blocking | OPEN | Use the target tenant's `/api/doc`; isolate it behind an adapter | Redacted success and error responses, endpoint/version confirmation |
+| OQ-01 | Jamf file-resolution API contract | Blocking | RESOLVED | Use deprecated `GET /api/v1/jcds/files/{fileName}` and parse `uri` until Jamf introduces a replacement; map the observed 404 payload to not found | Monitor Jamf deprecation notices; capture remaining non-404 error responses for resilience tests |
 | OQ-05 | Client and upstream range-request behavior | Blocking | OPEN | Capture real client traffic; on a miss fetch and publish the full object | `GET`, `HEAD`, resume and multi-range captures; JCDS response behavior |
-| OQ-06 | Permitted JCDS hosts and redirects | Blocking | OPEN | Explicit HTTPS hostname allowlist; revalidate each redirect | Production host/redirect inventory from tenant behavior and Jamf documentation |
-| OQ-11 | Flat filenames or nested paths | Blocking | OPEN | V1 accepts one filename segment ending in `.pkg` | Required package naming examples and collision analysis |
-| OQ-12 | Integrity source of truth | High | OPEN | Require complete transfer and valid package signatures initially; use upstream checksum when available | JCDS metadata/header inventory and enterprise validation policy |
-| OQ-03 | Package workload and concurrency | High | OPEN | Measure before fixing performance limits | Package count/size distribution, peak clients, common simultaneous requests |
-| OQ-07 | Store capacity and retention | High | OPEN | Treat 500 GB and 180 days as provisional only | Inventory growth, reuse interval, disk budget and operational cleanup policy |
-| OQ-02 | Client access control | High | OPEN | Server TLS plus enterprise-network allowlist; add mTLS if network trust is insufficient | Client network paths, proxy/VPN behavior and security policy |
+| OQ-06 | Permitted JCDS hosts and redirects | Blocking | IN REVIEW | One exact CloudFront distribution class is observed; allow exact configured hostnames only and revalidate redirects | Additional production samples and redirect behavior; approved runtime hostname inventory |
+| OQ-11 | Flat filenames or nested paths | Blocking | RESOLVED | V1 accepts exactly one filename segment ending in lowercase `.pkg`; nested paths and other types are out of scope | User-confirmed v1 scope; validation and negative tests |
+| OQ-12 | Integrity source of truth | High | RESOLVED | Require exact catalog `length` and SHA3-512 match before atomic publication; MD5 is non-authoritative | Sanitized catalog fields captured; implementation and mismatch tests required |
+| OQ-13 | JCDS catalog response shape | Blocking | RESOLVED | Parse the observed complete top-level JSON array; fail explicitly if a future response exposes an incomplete envelope | Complete response begins with `[` and has no pagination metadata in the observed contract |
+| OQ-03 | Package workload and concurrency | High | IN REVIEW | Design for 500–2,000 Macs; measure package distribution and peak simultaneous fills before load-test targets are frozen | Package count/size distribution, largest package, and common simultaneous requests |
+| OQ-07 | Store capacity and retention | High | RESOLVED FOR PILOT | Configurable 90-day default; cleanup below 30% free, oldest inactive first, recover to 35%; restricted persistent access index and audit; isolated target-Mac acceptance passed | Monitor real capacity behavior during pilot |
+| OQ-02 | Client access control | High | RESOLVED | Server-authenticated TLS without source-CIDR filtering or client authentication | Explicitly accepted route-reachable access and package exposure |
 | OQ-04 | Availability and service-level objective | Medium | OPEN | Provisional 99.5%, excluding approved maintenance, for the single-host release | Business impact, maintenance window and recovery expectations |
-| OQ-08 | TLS certificate ownership | Medium | OPEN | Enterprise DNS and automatically renewed enterprise PKI certificate | DNS owner, certificate platform and renewal responsibility |
-| OQ-09 | Secret delivery platform | Medium | OPEN | Read-only delivery from the enterprise secret store; no secret in images or Compose files | Available platform, rotation method and runtime integration |
-| OQ-10 | Monitoring and alerting platform | Medium | OPEN | Use the existing enterprise platform and expose Prometheus-compatible metrics where supported | Platform, log format, metric scraping and alert ownership |
+| OQ-08 | TLS certificate ownership | Medium | RESOLVED | Use `jcds-cache.appfruit.ch` and manual DNS validation for the pilot; certificate-expiry monitoring is mandatory | Assign the renewal owner and add unattended renewal before production approval |
+| OQ-09 | Secret delivery platform | Medium | RESOLVED | Root-owned mode-`0600` host environment file passed to Docker; never place the value in Git, images or Compose YAML | Exercise secret rotation and accept/document Docker-administrator visibility |
+| OQ-10 | Monitoring and alerting platform | Medium | WEBHOOK VALIDATED; METRICS API ACCEPTANCE PENDING | One collector feeds independent unauthenticated API and HTTPS webhook consumers; target-Mac webhook delivery is validated | Validate disabled/API-only/combined modes; assign receiver/alert owner, retention, escalation and signed-URL rotation |
+| OQ-14 | Production Mac hardware | Blocking | RESOLVED | Dedicated wired Mac mini, 24 GB RAM, 1 TB APFS | Confirm chip generation and usable capacity/headroom |
+| OQ-15 | Docker Desktop licensing | Blocking | RESOLVED | Use the organization-approved paid entitlement now available | Record subscription owner, renewal and support contacts |
+| OQ-16 | Unattended startup/session model | Blocking | IN REVIEW | FileVault/login handled; managed user LaunchAgent starts Docker Desktop, reconciles Compose and verifies HTTPS | Controller and simulated recovery test implemented; install and pass the target-Mac cold-boot test |
+| OQ-17 | Production storage backing | Blocking | RESOLVED FOR PILOT | Docker named volume at `/srv/jamf-store`; administrative access from macOS is sufficient; atomicity, permissions, restart and destructive recovery passed | Qualify final sizing, macOS reboot and Docker Desktop update behavior |
+| OQ-18 | NGINX access enforcement/client IP | Blocking | RESOLVED | Docker Desktop masks clients as `192.168.65.1`; source filtering removed and unrestricted route-level access accepted | Live LAN evidence captured on 2026-08-31 |
+| OQ-19 | Docker Desktop resources and updates | High | IN REVIEW | Service owner configures settings; Resource Saver remains disabled and updates controlled | Record final values and update owner |
+| OQ-20 | Cache backup/rebuild policy | Medium | RESOLVED FOR PILOT | No package backup; rebuild from JCDS and protect configuration/TLS/private environment files/revision/runbooks; isolated destructive recovery passed | Rehearse after material Docker Desktop storage changes |
+| OQ-21 | Production helper UID model | Blocking | RESOLVED | UID 65532 with primary GID 0 and all capabilities dropped; no UID-0 exception required | Real target-Mac fill, publication, restart and recovery passed |
 
 ## 6. Definition of ready for coding
 
 Repository scaffolding and mock-driven implementation can begin immediately. Real Jamf adapter completion is ready when:
 
-- [ ] OQ-01 has a sanitized but structurally complete API contract.
+- [x] OQ-01 has a sanitized successful and not-found contract plus an explicit deprecated-endpoint decision.
 - [ ] OQ-05 has enough evidence to select the miss/range policy.
 - [ ] OQ-06 has an enforceable destination and redirect allowlist.
-- [ ] OQ-11 fixes the canonical path model.
+- [x] OQ-11 fixes the canonical path model.
+- [x] OQ-13 fixes the catalog response as a complete top-level JSON array.
 - [x] The repository owner, name and public visibility are confirmed.
 - [x] A GitHub connection with permission to create or write the repository is available.
 
-OQ-12 may initially use the recommended starting position if upstream checksum metadata is not available. Capacity, availability, TLS, secrets and monitoring questions must be resolved before Phase 3.
+Availability SLO, Power Automate alert/retention ownership and external
+reachability monitoring remain open before production approval. Retention and
+rebuild policy are resolved for the pilot. TLS and secret-delivery decisions
+are fixed for the controlled pilot, while unattended certificate renewal
+remains an explicit gate.
 
 ## 7. Initial repository layout
 
@@ -236,7 +293,7 @@ The first coding milestone is a local, credential-free demonstration using mock 
 - Docker Compose development stack.
 - Mock OAuth, resolver and package endpoints.
 - Integration test for miss, streaming fill, atomic publication and subsequent local hit.
-- Integration test for concurrent requests producing one upstream transfer.
+- Integration test for one upstream transfer with byte-identical `JCDS` leader and live `INFLIGHT` follower responses.
 - README with setup, test and architecture notes.
 - Copies of the requirements and this execution plan under `docs/`.
 
@@ -251,17 +308,30 @@ The first coding milestone is a local, credential-free demonstration using mock 
 
 | Date | Item | Change | State |
 |---|---|---|---|
-| 2026-08-27 | Architecture | Selected NGINX plus a Go helper on one Linux container host | Resolved |
+| 2026-08-27 | Architecture | Selected NGINX plus a Go helper on one container host | Superseded on 2026-08-30 |
 | 2026-08-27 | Storage | Selected a filename-preserving filesystem store with hidden temporary files and atomic publication | Resolved |
 | 2026-08-27 | Package identity | Confirmed immutable filenames | Resolved |
 | 2026-08-27 | Execution | Established contract validation, vertical slice, hardening, production integration and rollout phases | Active |
 | 2026-08-27 | Repository | Confirmed public repository `fabianhartmann2/JCDS-ContentCache` and write access | Resolved |
 | 2026-08-27 | Foundation | Published the Go/NGINX/Compose skeleton; initial GitHub CI passed | Complete |
+| 2026-08-27 | Milestone M1 | Added automated deployed-path evidence for MISS-to-LOCAL delivery, local ranges, client-abort continuation, truncated-transfer cleanup and persistence across serving-container restarts | In review |
+| 2026-08-27 | Phase 2 resilience | Added typed OAuth/Jamf/object failure categories, URL/body redaction tests, controlled downstream mappings and local-hit availability during an upstream outage | In review |
+| 2026-08-27 | Host profile | Selected Ubuntu Server 26.04 LTS amd64 | Superseded on 2026-08-30 |
+| 2026-08-27 | Access and secrets | Selected `192.168.0.0/16` CIDR-only client access and a root-owned Docker environment file for the Jamf secret | Access decision superseded on 2026-08-31; secret decision remains active |
+| 2026-08-27 | Production candidate | Added hardened Compose/NGINX configuration, manual-DNS certificate procedure, expiry validation, monitoring, update and rollback guidance | In review |
+| 2026-08-30 | Production target | Replaced Ubuntu/Docker Engine with a dedicated Mac running Docker Desktop; retained the container application architecture and marked Mac operations decisions as blocking | Active |
+| 2026-08-31 | Client access | Live LAN request appeared as Docker gateway `192.168.65.1`; removed ineffective source-CIDR filtering and accepted access by any route-reachable client | Active |
+| 2026-08-31 | macOS production validation | Trusted TLS, real fill, local hit, byte range, restart persistence, helper-outage local availability, controlled miss failure and non-root recovery passed | Complete |
+| 2026-08-31 | Jamf path compatibility | Real `/Packages/` miss returned JCDS; lowercase follow-up returned LOCAL with byte-identical content and one shared access index | Complete |
+| 2026-08-31 | Cache lifecycle | Persistent protected access index and isolated conditional cleanup preserved recent files and symlinks while removing only eligible old regular packages | Complete for pilot |
+| 2026-08-31 | Volume recovery | Deleted both labeled volumes in an isolated project, recreated an empty service, rehydrated from JCDS and matched the private pre-deletion hash while production stayed ready | Complete for pilot |
+| 2026-08-31 | Concurrent live fan-out | Target Mac returned `JCDS` to the leader, `INFLIGHT` to a concurrent follower and `LOCAL` after publication; all three outputs were byte-identical | Complete |
+| 2026-08-30 | Real backend | Demonstrated real OAuth/catalog/resolver/JCDS fill, integrity-validated publication and a byte-identical local hit with sanitized NGINX telemetry | Complete |
 
 ## 10. Immediate next actions
 
-1. Implement and test the in-memory OAuth client-credentials token provider against a local mock endpoint.
-2. Define the replaceable Jamf file-resolver interface and sanitized response fixtures.
-3. Add mock resolver and object-download services for the first integration test.
-4. Enable default-branch protection and require the passing CI workflow when repository settings permit.
-5. Obtain a redacted successful Jamf file-resolution JSON response as the first external-contract artifact.
+1. Record the service-owner Docker Desktop resource and update settings.
+2. Capture actual managed-Mac `GET`, `HEAD`, resume and multi-range behavior from restricted NGINX request records to resolve OQ-05.
+3. Confirm whether real resolver URLs redirect and complete the exact JCDS hostname inventory to resolve OQ-06.
+4. Select the webhook receiver/authentication/alert owner, implement `docs/webhook-monitoring.md`, and establish certificate-renewal automation.
+5. Install the implemented LaunchAgent controller and complete the OQ-16 unattended reboot/session recovery test before final production approval.

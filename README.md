@@ -1,77 +1,211 @@
 # JCDS Content Cache
 
-Filesystem-backed pull-through package delivery for Jamf Cloud Distribution Service (JCDS).
-
-> **Status:** Early implementation. The current helper validates configuration, exposes health endpoints and rejects unsafe package paths. OAuth, Jamf resolution, streaming download and atomic publication are the next vertical-slice work.
-
-## Intended behavior
-
-Clients request a stable internal URL such as:
+`JCDS-ContentCache` is a filesystem-backed pull-through package store for Jamf Cloud Distribution Service (JCDS). Managed clients use a stable internal URL such as:
 
 ```text
-GET https://packages.example.invalid:8443/packages/ExampleFile.pkg
+https://jcds-cache.appfruit.ch:8443/Packages/ExampleFile.pkg
 ```
 
-NGINX serves a completed package directly from:
+NGINX serves complete packages directly from `/srv/jamf-store/packages/`. A cache miss is passed to a Go helper that obtains a Jamf OAuth token, retrieves authoritative size and SHA3-512 metadata, resolves the temporary JCDS download URL, streams the package to the first client, writes it to hidden same-filesystem temporary storage, and atomically publishes the completed file under its original name only after integrity validation succeeds.
+
+Jamf clients use `/Packages/<filename>.pkg` with an uppercase `P`. The endpoint
+also accepts the historical lowercase `/packages/<filename>.pkg` spelling.
+NGINX normalizes both internally to the same canonical file; no redirect or
+duplicate cache entry is created.
+
+> [!IMPORTANT]
+> The production target is a dedicated 24 GB/1 TB Mac mini running licensed Docker Desktop. The repository contains a validated LAN-facing macOS production candidate, but it is not finally production-approved until the documented acceptance gates are closed. Use real Jamf credentials only with the localhost integration profile or a reviewed production deployment, and always configure an exact JCDS hostname allowlist. Cache cleanup, destructive empty-volume recovery and Power Automate webhook delivery are validated for the pilot. The per-user unattended-start controller is implemented; its target-Mac cold-boot test, final capacity qualification, certificate renewal and monitoring operations ownership remain production gates.
+
+## Current milestone
+
+Milestone M1 demonstrates the complete local lifecycle without credentials:
+
+1. First `GET` is routed through the helper.
+2. Mock OAuth and catalog endpoints return package length and SHA3-512 metadata.
+3. The mock resolver returns a temporary object URL.
+4. The helper begins streaming while it writes and hashes a hidden `.part` file.
+5. A length- and SHA3-validated object is atomically published under its canonical filename.
+6. The next request is served directly by NGINX.
+7. Concurrent misses for the same filename share one upstream fill.
+8. Client disconnects do not cancel an active, bounded cache fill.
+9. Truncated or digest-mismatched transfers are discarded rather than published.
+10. Completed packages survive helper and NGINX container restarts.
+11. A range request on a miss retrieves the complete object; local hits support normal `206 Partial Content` delivery.
+12. Local packages remain available during a simulated Jamf/JCDS outage, while a missing package receives a controlled `502` response.
+13. OAuth, Jamf API, redirect, and object failures are categorized without returning dependency bodies or logging complete request URLs.
+14. NGINX emits detailed JSON request records with the observed client address, package filename and selected raw HTTP headers while continuing to exclude credentials, cookies, referrers, query strings and upstream URLs.
+
+The confirmed v1 contract accepts exactly one flat filename segment ending in lowercase `.pkg`. Nested paths and additional file types are deliberately outside the first release. Initial sizing targets 500–2,000 managed Macs, an approximately 500–600 GB package working set on the 1 TB Mac and at least 30 percent package-store free space.
+
+## Local demonstration
+
+Requirements: Docker Engine with the Compose plugin and `curl`.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up --build -d
+curl --fail --show-error --dump-header - \
+  http://localhost:8443/packages/ExampleFile.pkg \
+  --output /tmp/ExampleFile.pkg
+curl --fail --show-error --dump-header - \
+  http://localhost:8443/packages/ExampleFile.pkg \
+  --output /tmp/ExampleFile-second.pkg
+cmp /tmp/ExampleFile.pkg /tmp/ExampleFile-second.pkg
+```
+
+Expected response headers:
+
+- First request: `X-Package-Source: JCDS`
+- Subsequent request: `X-Package-Source: LOCAL`
+
+The local stack intentionally uses plain HTTP on host port `8443`. The production-candidate stack uses TLS and the host-specific certificate paths in the production NGINX template.
+
+Stop and remove the development stack:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml down
+```
+
+Add `-v` only when you intentionally want to delete the local package-store volume.
+
+## Test and build
+
+```bash
+go test -race ./...
+go vet ./...
+go build ./cmd/cache-helper ./cmd/mock-upstream ./cmd/contract-capture
+```
+
+CI also builds the container image. No test fixture contains a real token, secret, signed URL, or package.
+
+Run the deployed-path smoke test separately with Docker:
+
+```bash
+tests/integration/compose_smoke.sh
+```
+
+It proves the NGINX/helper `JCDS`-to-`LOCAL` transition, verifies that repeated and range requests make no additional upstream calls, restarts both serving containers, and confirms that the completed package remains locally available after restart and during an upstream outage.
+
+## Real-backend test on macOS
+
+After the mock stack passes, Docker Desktop on a Mac can run a localhost-only integration profile against the real Jamf/JCDS backend. It uses a Docker-managed test volume, validates all upstream TLS connections, injects credentials from a private file outside Git, and publishes plain HTTP only on `127.0.0.1:8443`. It is an integration-test profile, not a production service or LAN listener.
+
+Follow [Real-backend test on macOS](docs/macos-real-backend-test.md). Never commit or share the completed environment file, tenant hostname, exact JCDS hostname, signed URL, token, secret, or unsanitized helper log.
+
+## macOS production target
+
+The first production target is a dedicated Mac running Docker Desktop and serving `jcds-cache.appfruit.ch:8443` to any network client able to reach the listener. NGINX, the Go helper and a separate cache-maintainer run inside Docker Desktop's Linux VM. The maintainer records successful package access in a restricted volume and, by default, removes packages inactive for 90 days only when free space falls below 30 percent, stopping at 35 percent. These settings are configurable without rebuilding. The existing `deploy/macos/` profile is deliberately bound to localhost and is not the production listener.
+
+The macOS production candidate is defined in `deploy/macos-production/` with a baked TLS-enabled NGINX configuration, named-volume storage, private helper networking and hardened containers. Package administration from macOS through Docker or purpose-built commands satisfies the visibility requirement. A live LAN test proved that Docker Desktop replaces the original source with `192.168.65.1`; source-CIDR filtering was therefore removed by explicit service-owner decision. Server-authenticated TLS protects transport but does not authorize clients. An organization-approved paid Docker Desktop entitlement is available. The package store remains derived and rebuildable from JCDS.
+
+Concurrent full cache misses for one package share exactly one JCDS transfer.
+The leading request reports `X-Package-Source: JCDS`; followers immediately
+replay the available prefix from the growing private temporary file, follow new
+bytes and report `X-Package-Source: INFLIGHT`. Range followers wait for verified
+atomic publication and then receive normal `206 LOCAL` delivery. Only a
+length- and SHA3-512-verified file becomes visible in the final cache namespace.
+
+See [Production architecture](docs/architecture.md) for confirmed boundaries and blocking decisions, [Production deployment](docs/production-deployment.md) for the current runbook, [Unattended macOS reboot recovery](docs/macos-unattended-recovery.md) for LaunchAgent installation and cold-boot acceptance, [Production readiness plan](docs/production-readiness-plan.md) for the retained path to approval, and [macOS production validation](docs/macos-production-validation-2026-08-31.md) for sanitized target-Mac evidence. Do not expose the localhost test profile to the LAN or copy a completed environment file, real Jamf tenant URL, signed download URL, or exact production JCDS hostname into GitHub.
+
+## Client request monitoring
+
+NGINX writes one structured JSON record to standard output for each request under `/packages/`. The record includes the package filename, container-observed client address, raw `User-Agent`, `Range` and `If-Range` request headers, raw `Content-Range` and `Content-Length` response headers, request classifications, cache source, status, bytes, timing and completion. `X-Request-ID` is returned to the client and forwarded to the helper for correlation.
+
+The log intentionally excludes query strings, authorization, cookies, referrer, Jamf credentials, tokens, signed URLs and bodies. Treat the log as restricted operational data because filenames, addresses and selected headers can identify clients and installed software. Docker Desktop production traffic may show its gateway address rather than the original client; NGINX cannot reconstruct an address removed by Docker Desktop's port forwarding.
+
+Inspect development records with:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml logs --no-color nginx \
+  | sed -n 's/^[^{]*//p' \
+  | jq -c 'select(.event == "package_request")'
+```
+
+See [Client request monitoring](docs/client-request-monitoring.md) for the schema, disclosure boundary, request classifications, example analyses, proxy caveats, and production guidance.
+
+The optional monitoring integration lets the existing cache-maintainer create
+a periodic privacy-bounded service snapshot. Independently enabled consumers
+can expose the latest snapshot without authentication at `/health/metrics`
+through the production TLS listener and/or send the exact same JSON bytes to a
+configurable HTTPS webhook. Both consumers are disabled by default and are
+deliberately decoupled from delivery, cleanup and readiness. They are configured with the separate
+`deploy/macos-production/compose.monitoring.yaml` override. See
+[Metrics API and webhook monitoring](docs/webhook-monitoring.md) for the implemented payload,
+configuration, security controls, validated Power Automate delivery and
+remaining operational gates.
+
+## Sanitized live-contract capture
+
+After a dedicated read-only Jamf API client is available, run the Docker wrapper from an interactive terminal:
+
+```bash
+./scripts/capture-live-contracts.sh > sanitized-contract-report.json
+```
+
+The wrapper prompts for the Jamf base URL, read-only API client ID, hidden client secret, one existing flat `.pkg` filename, and an optional enterprise CA bundle. It builds an unprivileged one-shot image, runs with a read-only root filesystem and all Linux capabilities dropped, removes the container afterward, and applies a final disclosure guard before printing the report. Values entered at the prompts are not placed in shell history or written to the report. Like any Docker environment value, they remain inspectable by a local Docker administrator while the short-lived container is running.
+
+The live validation performs one OAuth request, one catalog request, one resolver request, one object `HEAD`, and one `GET` with `Range: bytes=0-0`. If the object endpoint ignores the range and returns `200`, the client closes the body immediately rather than intentionally downloading the complete package. The generated JSON contains only:
+
+- OAuth field types, token type and lifetime
+- JCDS file count and aggregate v1 `.pkg` count, total bytes and largest bytes
+- metadata-presence and digest-length checks for the selected package
+- truncated SHA-256 hostname fingerprints, query-parameter count and redirect observations
+- status and capability observations for `HEAD` and the one-byte range probe
+
+It does not contain the access token, client secret, tenant hostname, selected package name, package digests, signed URL, object path, query values, ETag or Last-Modified value. The report filename pattern is ignored by Git, but the report should still be reviewed before it is shared.
+
+If outbound access requires a static proxy, export `HTTPS_PROXY` and, if needed, `NO_PROXY` before running the wrapper. The container inherits those values for the capture only. Networks that inspect TLS must also provide the inspecting enterprise root or intermediate certificates as a PEM file at the optional prompt, or export its path as `CAPTURE_CA_CERT_FILE`. The wrapper leaves the original untouched, creates a short-lived read-only copy for the non-root container, combines it in memory-backed temporary storage with the public CA bundle, and deletes the copy during cleanup. The CA is never copied into the image or report.
+
+The capture image performs no package-repository download during its final build stage. Its public CA bundle is copied from the pinned Go builder image, which avoids failures caused by TLS inspection of Alpine package repositories.
+
+Developers with Go 1.24 may run `go run ./cmd/contract-capture` directly after exporting the six environment variables shown in `deploy/contract-capture/compose.yaml`.
+
+## Repository map
 
 ```text
-/srv/jamf-store/packages/ExampleFile.pkg
+cmd/cache-helper/       Go service entry point
+cmd/mock-upstream/      Credential-free development upstream
+cmd/contract-capture/   Sanitized live-contract validation tool
+internal/auth/          OAuth token reuse and refresh
+internal/config/        Environment parsing and validation
+internal/download/      Download URL and redirect policy
+internal/httpapi/       Health and package request handlers
+internal/jamf/          Replaceable Jamf resolver and metadata-catalog adapters
+internal/store/         Temporary files, publication and single-flight locks
+deploy/compose/         Local development stack
+deploy/contract-capture/ Hardened one-shot live validation image
+deploy/macos/           Localhost-only real-backend Docker Desktop test
+deploy/macos-production/ TLS production profile and per-user recovery agent
+deploy/nginx/           Development and production NGINX templates
+deploy/production/      Superseded Linux candidate retained temporarily for reference
+scripts/                Contract, certificate and macOS recovery operations
+docs/                   Architecture, requirements, execution plan and contract evidence
 ```
-
-On a miss, NGINX calls the internal Go helper. The helper will obtain a short-lived OAuth token, resolve a temporary JCDS URL, validate its destination, stream the object to the first client, and atomically publish the completed file for later local delivery.
-
-## Current repository contents
-
-- `cmd/cache-helper`: service entry point and graceful shutdown
-- `internal/config`: strict non-secret configuration
-- `internal/pathpolicy`: v1 package filename validation
-- `internal/httpapi`: health endpoints and safe miss-request validation
-- `deploy/nginx`: local-hit and helper-miss routing
-- `deploy/compose`: local two-container development stack
-- `docs`: requirements and phased execution plan
-
-## Local development
-
-Requirements:
-
-- Go version declared in `go.mod`
-- Docker with Compose for the two-container stack
-
-Run unit tests:
-
-```console
-go test ./...
-```
-
-Start the development stack:
-
-```console
-docker compose -f deploy/compose/compose.yaml up --build
-```
-
-Check the helper through NGINX:
-
-```console
-curl --fail http://localhost:8081/livez
-curl --fail http://localhost:8081/readyz
-```
-
-The development listener is intentionally plain HTTP on port 8081. Production TLS, enterprise access controls and credentials will be added only after the relevant open questions are resolved.
-
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CACHE_HELPER_LISTEN_ADDRESS` | `:8080` | Internal helper listener |
-| `CACHE_STORE_ROOT` | `/srv/jamf-store` | Absolute root of the filename-preserving package store |
-
-No credentials belong in this repository. Future Jamf client secrets must be supplied by the selected runtime secret mechanism.
 
 ## Documentation
 
-- `docs/requirements.md` — normative product and technical requirements
-- `docs/execution-plan.md` — active phase plan, gates and open-question register
+- [Technical requirements](docs/requirements.md)
+- [Production architecture](docs/architecture.md)
+- [Project execution plan](docs/execution-plan.md)
+- [External-contract evidence template](docs/external-contracts.md)
+- [Client request monitoring](docs/client-request-monitoring.md)
+- [Webhook monitoring concept](docs/webhook-monitoring.md)
+- [Real-backend test on macOS](docs/macos-real-backend-test.md)
+- [Production deployment readiness](docs/production-deployment.md)
+- [Unattended macOS reboot recovery](docs/macos-unattended-recovery.md)
+
+## Security notes
+
+- Never commit Jamf client credentials, OAuth tokens, temporary signed URLs, or unsanitized API responses.
+- The helper accepts only a validated package filename and never accepts a client-supplied upstream URL.
+- Every resolved URL and redirect is checked against the configured hostname allowlist.
+- In production mode, every allowed download hostname is resolved before use and the request is rejected if any returned address is private, loopback or link-local.
+- Dependency response bodies and complete request URLs are excluded from propagated errors so temporary signed queries cannot enter normal logs.
+- NGINX request logs expose package identity and a strict allowlist of diagnostic headers, but omit credentials, cookies, referrers, query strings and upstream URLs; standard per-request error logging is suppressed because NGINX error messages can contain the raw request line.
+- Jamf catalog length and SHA3-512 metadata are verified before a downloaded file is published.
+- MD5 is parsed for interoperability but is not used as the security integrity boundary.
+- NGINX receives read-only access to completed package storage; the helper owns publication.
+- Hidden temporary storage is outside the namespace served by NGINX.
 
 ## License
 
-No license has been selected yet. Until one is added, normal copyright rules apply.
+No open-source license has been selected yet. Until the repository owner adds one, normal copyright restrictions apply.

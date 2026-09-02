@@ -1,0 +1,3 @@
+This is a credential-free test fixture for the JCDS Content Cache vertical slice.
+It is not an Apple installer package and must never be used for production deployment.
+

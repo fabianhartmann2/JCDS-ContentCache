@@ -1,0 +1,180 @@
+name: jcds-content-cache-macos-production
+
+services:
+  store-init:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        mkdir -p /srv/jamf-store/packages /srv/jamf-store/.temporary /srv/jamf-maintenance
+        chmod 0755 /srv/jamf-store
+        chmod 0775 /srv/jamf-store/packages
+        chmod 0770 /srv/jamf-store/.temporary
+        chmod 0770 /srv/jamf-maintenance
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - FOWNER
+    volumes:
+      - package-store:/srv/jamf-store
+      - maintenance-store:/srv/jamf-maintenance
+    restart: "no"
+
+  cache-helper:
+    image: jcds-content-cache:${JCDS_MAC_PROD_IMAGE_TAG:-production}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: cache-helper
+    # Docker Desktop rejects cross-UID chown on some named volumes. UID 65532
+    # remains non-root; GID 0 can write only to the group-writable store paths
+    # prepared by store-init. The root filesystem stays read-only and all
+    # capabilities remain dropped.
+    user: "65532:0"
+    depends_on:
+      store-init:
+        condition: service_completed_successfully
+    env_file:
+      - ${JCDS_MAC_PROD_HELPER_ENV_FILE:?Set JCDS_MAC_PROD_HELPER_ENV_FILE to the absolute path of the private helper environment file}
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
+    stop_grace_period: 2m
+    restart: unless-stopped
+    volumes:
+      - package-store:/srv/jamf-store
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+    networks:
+      - backend
+
+  cache-maintainer:
+    image: jcds-content-cache-maintainer:${JCDS_MAC_PROD_IMAGE_TAG:-production}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: cache-maintainer
+    user: "65532:0"
+    depends_on:
+      store-init:
+        condition: service_completed_successfully
+    environment:
+      CACHE_RETENTION: ${JCDS_CACHE_RETENTION:-2160h}
+      CACHE_CLEANUP_INTERVAL: ${JCDS_CACHE_CLEANUP_INTERVAL:-15m}
+      CACHE_CLEANUP_TRIGGER_FREE_PERCENT: ${JCDS_CACHE_CLEANUP_TRIGGER_FREE_PERCENT:-30}
+      CACHE_CLEANUP_TARGET_FREE_PERCENT: ${JCDS_CACHE_CLEANUP_TARGET_FREE_PERCENT:-35}
+      ACCESS_INDEX_FLUSH_INTERVAL: ${JCDS_ACCESS_INDEX_FLUSH_INTERVAL:-30s}
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 256m
+    restart: unless-stopped
+    volumes:
+      - package-store:/srv/jamf-store
+      - maintenance-store:/srv/jamf-maintenance
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8082/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    networks:
+      - backend
+
+  nginx:
+    image: jcds-content-cache-nginx:${JCDS_MAC_PROD_IMAGE_TAG:-production}
+    build:
+      context: ../..
+      dockerfile: deploy/macos-production/nginx.Dockerfile
+    depends_on:
+      cache-helper:
+        condition: service_healthy
+      cache-maintainer:
+        condition: service_healthy
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      # Allows the root NGINX master to read a protected Mac-owned TLS key
+      # without granting general write bypass. Workers still run as nginx.
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
+    pids_limit: 256
+    mem_limit: 512m
+    restart: unless-stopped
+    ports:
+      - "${JCDS_MAC_PROD_LISTEN_IP:-0.0.0.0}:${JCDS_MAC_PROD_LISTEN_PORT:-8443}:8443/tcp"
+    volumes:
+      - type: volume
+        source: package-store
+        target: /srv/jamf-store
+        read_only: true
+      - type: bind
+        source: ${JCDS_MAC_PROD_TLS_DIR:?Set JCDS_MAC_PROD_TLS_DIR to the absolute directory containing fullchain.pem and privkey.pem}
+        target: /etc/nginx/tls
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  package-store:
+  maintenance-store:

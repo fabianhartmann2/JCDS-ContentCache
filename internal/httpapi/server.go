@@ -1,100 +1,451 @@
-// Package httpapi exposes the internal HTTP interface used by NGINX.
 package httpapi
 
 import (
+	"context"
+	"crypto/sha3"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
-	"os"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
-	"github.com/fabianhartmann2/JCDS-ContentCache/internal/config"
-	"github.com/fabianhartmann2/JCDS-ContentCache/internal/pathpolicy"
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/auth"
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/download"
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/jamf"
+	"github.com/fabianhartmann2/JCDS-ContentCache/internal/store"
 )
 
-// New returns the helper's internal HTTP handler. Package retrieval currently
-// stops after validation; the Jamf adapter and streaming store-fill are the next
-// vertical-slice implementation step.
-func New(cfg config.Config, logger *slog.Logger) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.HandleFunc("GET /readyz", readinessHandler(cfg.StoreRoot))
-	mux.Handle("/packages/", packageHandler(logger))
-	// Validate package paths before ServeMux can canonicalize dot segments or
-	// encoded separators into a redirect.
-	return securityHeaders(packagePathGuard(mux))
+const (
+	packagePathPrefix     = "/packages/"
+	jamfPackagePathPrefix = "/Packages/"
+)
+
+type objectSource interface {
+	Open(context.Context, string) (*http.Response, error)
 }
 
-func readinessHandler(storeRoot string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		info, err := os.Stat(storeRoot)
-		if err != nil || !info.IsDir() {
-			safeError(w, http.StatusServiceUnavailable, "store unavailable")
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready\n"))
+type Server struct {
+	logger          *slog.Logger
+	store           *store.Store
+	flights         *store.Flights
+	metadata        jamf.MetadataSource
+	resolver        jamf.Resolver
+	downloader      objectSource
+	fillTimeout     time.Duration
+	maxPackageBytes int64
+	minFreeBytes    int64
+	minFreePercent  float64
+}
+
+func New(
+	logger *slog.Logger,
+	packageStore *store.Store,
+	metadata jamf.MetadataSource,
+	resolver jamf.Resolver,
+	downloader objectSource,
+	fillTimeout time.Duration,
+	maxPackageBytes int64,
+	minFreeBytes int64,
+	minFreePercent float64,
+) *Server {
+	return &Server{
+		logger:          logger,
+		store:           packageStore,
+		flights:         store.NewFlights(),
+		metadata:        metadata,
+		resolver:        resolver,
+		downloader:      downloader,
+		fillTimeout:     fillTimeout,
+		maxPackageBytes: maxPackageBytes,
+		minFreeBytes:    minFreeBytes,
+		minFreePercent:  minFreePercent,
 	}
 }
 
-func packageHandler(logger *slog.Logger) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			safeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
-		if containsEncodedSeparator(r.URL.RawPath) {
-			safeError(w, http.StatusBadRequest, "invalid package path")
-			return
-		}
-
-		name, err := pathpolicy.PackageName(r.URL.Path)
-		if err != nil {
-			safeError(w, http.StatusBadRequest, "invalid package path")
-			return
-		}
-
-		logger.Info("validated package miss", "package", name)
-		safeError(w, http.StatusServiceUnavailable, "upstream adapter not configured")
-	})
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health/live", s.handleLiveness)
+	mux.HandleFunc("/health/ready", s.handleReadiness)
+	mux.HandleFunc(packagePathPrefix, s.handlePackage)
+	mux.HandleFunc(jamfPackagePathPrefix, s.handlePackage)
+	return mux
 }
 
-func containsEncodedSeparator(rawPath string) bool {
-	rawPath = strings.ToLower(rawPath)
-	return strings.Contains(rawPath, "%2f") || strings.Contains(rawPath, "%5c")
+func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		_, _ = io.WriteString(w, "{\"status\":\"ok\"}\n")
+	}
 }
 
-func packagePathGuard(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/packages" || strings.HasPrefix(r.URL.Path, "/packages/") {
-			if containsEncodedSeparator(r.URL.RawPath) {
-				safeError(w, http.StatusBadRequest, "invalid package path")
-				return
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	if err := s.store.Ready(); err != nil {
+		http.Error(w, "package store is not ready", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		_, _ = io.WriteString(w, "{\"status\":\"ready\"}\n")
+	}
+}
+
+func (s *Server) handlePackage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	filename, err := packageFilename(r)
+	if err != nil {
+		http.Error(w, "invalid package path", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.serveLocal(w, r, filename); err == nil {
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.logger.Error("local package lookup failed", "filename", filename, "error", err)
+		http.Error(w, "local package store failure", http.StatusInternalServerError)
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "package is not stored locally; perform a full GET", http.StatusServiceUnavailable)
+		return
+	}
+
+	handle, leader := s.flights.Join(filename)
+	if !leader {
+		if r.Header.Get("Range") == "" {
+			tracked := &trackingResponseWriter{ResponseWriter: w}
+			if err := s.streamInflight(r.Context(), tracked, filename, handle); err != nil && !tracked.started {
+				// A completed file can win the narrow race between the first
+				// local lookup and joining a flight that is being removed.
+				if localErr := s.serveLocal(w, r, filename); localErr == nil {
+					return
+				}
+				s.writeError(w, filename, err)
+			} else if err != nil {
+				s.logger.Info("in-flight client disconnected or shared fill failed", "filename", filename, "error", err)
 			}
-			if _, err := pathpolicy.PackageName(r.URL.Path); err != nil {
-				safeError(w, http.StatusBadRequest, "invalid package path")
-				return
+			return
+		}
+		if err := handle.Wait(r.Context()); err != nil {
+			s.writeError(w, filename, err)
+			return
+		}
+		if err := s.serveLocal(w, r, filename); err != nil {
+			s.writeError(w, filename, fmt.Errorf("open package after coordinated fill: %w", err))
+		}
+		return
+	}
+
+	// The package may have been published after the initial local lookup but
+	// before this request created a new flight.
+	if err := s.serveLocal(w, r, filename); err == nil {
+		handle.Finish(nil)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		handle.Finish(err)
+		s.writeError(w, filename, err)
+		return
+	}
+
+	fillContext, cancel := context.WithTimeout(context.Background(), s.fillTimeout)
+	defer cancel()
+	tracked := &trackingResponseWriter{ResponseWriter: w}
+	err = s.fillAndStream(fillContext, tracked, filename, handle)
+	handle.Finish(err)
+	if err != nil && !tracked.started {
+		s.writeError(w, filename, err)
+	} else if err != nil {
+		s.logger.Error("package fill failed after streaming started", "filename", filename, "error", err)
+	}
+}
+
+func (s *Server) fillAndStream(ctx context.Context, w *trackingResponseWriter, filename string, flight *store.FlightHandle) error {
+	metadata, err := s.metadata.Lookup(ctx, filename)
+	if err != nil {
+		return err
+	}
+	if metadata.Length > s.maxPackageBytes {
+		return errors.New("Jamf catalog length exceeds the configured maximum package size")
+	}
+	releaseCapacity, err := s.store.ReserveCapacity(metadata.Length, s.minFreeBytes, s.minFreePercent)
+	if err != nil {
+		return err
+	}
+	defer releaseCapacity()
+
+	downloadURL, err := s.resolver.Resolve(ctx, filename)
+	if err != nil {
+		return err
+	}
+	upstream, err := s.downloader.Open(ctx, downloadURL)
+	if err != nil {
+		return err
+	}
+	defer upstream.Body.Close()
+	if upstream.ContentLength >= 0 && upstream.ContentLength != metadata.Length {
+		return errors.New("upstream Content-Length does not match Jamf catalog metadata")
+	}
+
+	pending, err := s.store.Begin(filename)
+	if err != nil {
+		return err
+	}
+	defer pending.Abort()
+	if err := flight.Prepare(pending, metadata.Length); err != nil {
+		return err
+	}
+
+	copySafeHeaders(w.Header(), upstream.Header, filename)
+	w.Header().Set("Content-Length", strconv.FormatInt(metadata.Length, 10))
+	w.Header().Set("X-Package-Source", "JCDS")
+	w.WriteHeader(http.StatusOK)
+
+	buffer := make([]byte, 64*1024)
+	hasher := sha3.New512()
+	var downloaded int64
+	clientConnected := true
+	for {
+		readBytes, readErr := upstream.Body.Read(buffer)
+		if readBytes > 0 {
+			downloaded += int64(readBytes)
+			if downloaded > s.maxPackageBytes {
+				return errors.New("upstream object exceeded the configured maximum size")
+			}
+			if _, err := pending.Write(buffer[:readBytes]); err != nil {
+				return fmt.Errorf("write temporary package: %w", err)
+			}
+			if _, err := hasher.Write(buffer[:readBytes]); err != nil {
+				return fmt.Errorf("hash temporary package: %w", err)
+			}
+			flight.Advance(downloaded)
+			if clientConnected {
+				if _, err := w.Write(buffer[:readBytes]); err != nil {
+					clientConnected = false
+					s.logger.Info("client disconnected; package fill continues", "filename", filename)
+				} else {
+					w.Flush()
+				}
 			}
 		}
-		next.ServeHTTP(w, r)
-	})
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read upstream object: %w", readErr)
+		}
+	}
+
+	if downloaded != metadata.Length {
+		return fmt.Errorf("downloaded %d bytes, Jamf catalog expected %d", downloaded, metadata.Length)
+	}
+	actualSHA3 := hex.EncodeToString(hasher.Sum(nil))
+	if !strings.EqualFold(actualSHA3, metadata.SHA3) {
+		return errors.New("downloaded package SHA3-512 does not match Jamf catalog metadata")
+	}
+	if err := pending.Commit(metadata.Length); err != nil {
+		return err
+	}
+	s.logger.Info("package published", "filename", filename, "bytes", downloaded, "integrity", "sha3-512")
+	return nil
 }
 
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		next.ServeHTTP(w, r)
-	})
+func (s *Server) streamInflight(ctx context.Context, w *trackingResponseWriter, filename string, flight *store.FlightHandle) error {
+	file, expectedBytes, err := flight.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Content-Length", strconv.FormatInt(expectedBytes, 10))
+	w.Header().Set("X-Package-Source", "INFLIGHT")
+	w.WriteHeader(http.StatusOK)
+
+	buffer := make([]byte, 64*1024)
+	var offset int64
+	for offset < expectedBytes {
+		readBytes, readErr := file.Read(buffer)
+		if readBytes > 0 {
+			if _, err := w.Write(buffer[:readBytes]); err != nil {
+				return err
+			}
+			offset += int64(readBytes)
+			w.Flush()
+		}
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return fmt.Errorf("read growing temporary package: %w", readErr)
+		}
+		if offset >= expectedBytes {
+			break
+		}
+		if readBytes == 0 || errors.Is(readErr, io.EOF) {
+			writtenBytes, finished, flightErr := flight.WaitForBytes(ctx, offset)
+			if finished && writtenBytes <= offset {
+				if flightErr != nil {
+					return flightErr
+				}
+				return fmt.Errorf("shared package fill ended after %d of %d bytes", offset, expectedBytes)
+			}
+		}
+	}
+	return flight.Wait(ctx)
 }
 
-func safeError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+func (s *Server) serveLocal(w http.ResponseWriter, r *http.Request, filename string) error {
+	file, info, err := s.store.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("X-Package-Source", "LOCAL")
+	http.ServeContent(w, r, filename, info.ModTime(), file)
+	return nil
+}
+
+func (s *Server) writeError(w http.ResponseWriter, filename string, err error) {
+	status := http.StatusBadGateway
+	message := "package retrieval failed"
+	category := "upstream_failure"
+
+	switch {
+	case errors.Is(err, jamf.ErrNotFound):
+		status = http.StatusNotFound
+		message = "package not found"
+		category = "resolver_not_found"
+	case errors.Is(err, download.ErrNotFound):
+		status = http.StatusNotFound
+		message = "package not found"
+		category = "jcds_not_found"
+	case errors.Is(err, auth.ErrRejected), errors.Is(err, jamf.ErrUnauthorized), errors.Is(err, jamf.ErrForbidden):
+		message = "package source is unavailable"
+		category = "jamf_auth_failed"
+	case errors.Is(err, auth.ErrThrottled), errors.Is(err, jamf.ErrThrottled):
+		status = http.StatusServiceUnavailable
+		message = "package source is temporarily unavailable"
+		category = "jamf_throttled"
+		w.Header().Set("Retry-After", "30")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, auth.ErrTimeout), errors.Is(err, jamf.ErrTimeout), errors.Is(err, download.ErrTimeout):
+		status = http.StatusGatewayTimeout
+		message = "package retrieval timed out"
+		category = "upstream_timeout"
+	case errors.Is(err, context.Canceled):
+		status = http.StatusRequestTimeout
+		message = "package request was canceled"
+		category = "request_canceled"
+	case errors.Is(err, store.ErrInsufficientSpace):
+		status = http.StatusInsufficientStorage
+		message = "package store has insufficient free space"
+		category = "store_capacity_exhausted"
+	case errors.Is(err, auth.ErrInvalidResponse):
+		message = "package source is unavailable"
+		category = "oauth_response_invalid"
+	case errors.Is(err, jamf.ErrInvalidResponse), errors.Is(err, jamf.ErrUnexpectedResponse):
+		message = "package source is unavailable"
+		category = "jamf_response_invalid"
+	case errors.Is(err, download.ErrPolicyViolation):
+		category = "download_url_rejected"
+	case errors.Is(err, auth.ErrUnavailable), errors.Is(err, jamf.ErrUnavailable), errors.Is(err, download.ErrUnavailable):
+		message = "package source is unavailable"
+		category = "upstream_unavailable"
+	}
+
+	s.logger.Error("package request failed", "filename", filename, "status", status, "category", category, "error", err)
 	http.Error(w, message, status)
+}
+
+func packageFilename(r *http.Request) (string, error) {
+	if r.URL.RawQuery != "" {
+		return "", errors.New("query parameters are not accepted")
+	}
+	escapedPath := r.URL.EscapedPath()
+	prefix := packagePathPrefix
+	if strings.HasPrefix(escapedPath, jamfPackagePathPrefix) {
+		prefix = jamfPackagePathPrefix
+	} else if !strings.HasPrefix(escapedPath, packagePathPrefix) {
+		return "", errors.New("path is outside the package namespace")
+	}
+	escapedFilename := strings.TrimPrefix(escapedPath, prefix)
+	if escapedFilename == "" || strings.Contains(escapedFilename, "/") {
+		return "", errors.New("package path must contain exactly one filename segment")
+	}
+	lowerEscaped := strings.ToLower(escapedFilename)
+	if strings.Contains(lowerEscaped, "%2f") || strings.Contains(lowerEscaped, "%5c") {
+		return "", errors.New("encoded path separators are not accepted")
+	}
+	filename, err := url.PathUnescape(escapedFilename)
+	if err != nil {
+		return "", errors.New("package filename contains malformed escaping")
+	}
+	if err := store.ValidateFilename(filename); err != nil {
+		return "", err
+	}
+	return filename, nil
+}
+
+func copySafeHeaders(destination, source http.Header, filename string) {
+	contentType := source.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	destination.Set("Content-Type", contentType)
+	destination.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	for _, header := range []string{"ETag", "Last-Modified"} {
+		if value := source.Get(header); value != "" {
+			destination.Set(header, value)
+		}
+	}
+}
+
+func methodNotAllowed(w http.ResponseWriter, methods ...string) {
+	w.Header().Set("Allow", strings.Join(methods, ", "))
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+type trackingResponseWriter struct {
+	http.ResponseWriter
+	started bool
+}
+
+func (w *trackingResponseWriter) WriteHeader(statusCode int) {
+	if !w.started {
+		w.started = true
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *trackingResponseWriter) Write(data []byte) (int, error) {
+	if !w.started {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *trackingResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
